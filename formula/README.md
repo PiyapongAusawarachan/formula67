@@ -112,7 +112,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-**Telemetry dashboard (matplotlib; generates PNG / HTML under `reports/`):**
+**Telemetry dashboard (matplotlib; generates PNG under `reports/`, e.g. `telemetry_report.png`):**
 
 ```bash
 python visualize.py
@@ -132,7 +132,7 @@ python visualize.py
 | `stats.py` | `StatsLogger`, `Leaderboard`, CSV paths |
 | `visualize.py` | Report generation |
 | `stats/` | Runtime CSV telemetry |
-| `reports/` | Generated charts / HTML |
+| `reports/` | Generated charts (PNG) |
 
 ---
 

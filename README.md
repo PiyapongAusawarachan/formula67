@@ -114,7 +114,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-**Telemetry dashboard (matplotlib; generates PNG / HTML under `formula/reports/`):**
+**Telemetry dashboard (matplotlib; writes PNG under `formula/reports/`, e.g. `telemetry_report.png`):**
 
 ```bash
 cd formula
@@ -135,7 +135,7 @@ python visualize.py
 | [`formula/stats.py`](formula/stats.py) | `StatsLogger`, `Leaderboard`, CSV paths |
 | [`formula/visualize.py`](formula/visualize.py) | Report generation |
 | [`formula/stats/`](formula/stats/) | Runtime CSV telemetry |
-| [`formula/reports/`](formula/reports/) | Generated charts / HTML |
+| [`formula/reports/`](formula/reports/) | Generated charts (PNG) |
 
 A copy of this documentation also exists at [`formula/README.md`](formula/README.md).
 
