@@ -18,6 +18,8 @@ _DIFFICULTY_PICKER_CACHE = None
 _DIFFICULTY_CARD_RECTS = {}
 _START_BUTTON_RECT = None
 _START_BTN_CACHE = None
+_TELEMETRY_MENU_RECT = None
+_STATICS_BTN_CACHE = None
 
 # Full-screen menu layer (everything except Start button) — rebuilt only when
 # difficulty, leaderboard, or window size changes. Saves heavy per-frame draws.
@@ -38,7 +40,7 @@ def _build_menu_static():
         "3-Lap Time Trial", True, (200, 220, 255))
     hint = HUD_FONT_SMALL.render(
         "W/S = drive   A/D = steer   SHIFT = nitro   "
-        "F11 = fullscreen   ESC = quit",
+        "F11 = fullscreen   ESC = quit   V = statics",
         True, (180, 200, 230))
     diff_hint = HUD_FONT_SMALL.render(
         "Choose: click card · keys 1-3 · arrows or A/D",
@@ -64,6 +66,28 @@ def _build_start_button(w, h, hovering):
                        radius=14, width=border_w)
     label = render_text_with_shadow(
         HUD_FONT, "START RACE  -  SPACE",
+        color=(255, 255, 255), shadow_color=(0, 0, 0), offset=2)
+    surf.blit(label,
+              (rect.centerx - label.get_width() // 2,
+               rect.centery - label.get_height() // 2))
+    return surf
+
+
+def _build_statics_button(w, h, hovering):
+    surf = pygame.Surface((w, h), pygame.SRCALPHA)
+    rect = pygame.Rect(0, 0, w, h)
+    if hovering:
+        fill = (100, 230, 150, 248)
+        border = (220, 255, 235, 245)
+        border_w = 3
+    else:
+        fill = (45, 150, 95, 240)
+        border = (160, 240, 190, 230)
+        border_w = 2
+    draw_rounded_panel(surf, rect, fill=fill, border=border,
+                       radius=14, width=border_w)
+    label = render_text_with_shadow(
+        HUD_FONT, "STATICS  -  V",
         color=(255, 255, 255), shadow_color=(0, 0, 0), offset=2)
     surf.blit(label,
               (rect.centerx - label.get_width() // 2,
@@ -250,7 +274,7 @@ def draw_start_screen(win, track_snapshot, race_manager, leaderboard,
     global _MENU_OVERLAY, _MENU_STATIC_CACHE, _MENU_LEADERBOARD_CACHE
     global _DIFFICULTY_PICKER_CACHE
     global _DIFFICULTY_CARD_RECTS, _START_BUTTON_RECT
-    global _START_BTN_CACHE
+    global _START_BTN_CACHE, _TELEMETRY_MENU_RECT, _STATICS_BTN_CACHE
     global _MENU_COMPOSITE, _MENU_COMPOSITE_SIG
     global _MENU_MERGED_BASE, _MENU_MERGED_SIG
 
@@ -311,13 +335,15 @@ def draw_start_screen(win, track_snapshot, race_manager, leaderboard,
                                picker_y + 12 + card_h + 22, btn_w, btn_h)
         _START_BUTTON_RECT = btn_rect
 
+        statics_gap = 10
+        statics_h = btn_h
+        hint_y = btn_rect.bottom + statics_gap + statics_h + statics_gap
         comp.blit(s["hint"],
-                  (cx - s["hint"].get_width() // 2,
-                   btn_rect.bottom + 12))
+                  (cx - s["hint"].get_width() // 2, hint_y))
 
         panel = _MENU_LEADERBOARD_CACHE[1]
         panel_x = cx - panel.get_width() // 2
-        panel_y = btn_rect.bottom + 44
+        panel_y = hint_y + s["hint"].get_height() + 18
         if panel_y + panel.get_height() > h - 12:
             panel_y = h - panel.get_height() - 12
         comp.blit(panel, (panel_x, panel_y))
@@ -351,6 +377,24 @@ def draw_start_screen(win, track_snapshot, race_manager, leaderboard,
     hovering = btn_rect.collidepoint(mouse_pos)
     btn_surf = _START_BTN_CACHE[2] if hovering else _START_BTN_CACHE[1]
     win.blit(btn_surf, (btn_rect.x, btn_rect.y))
+
+    btn_w, btn_h = btn_rect.w, btn_rect.h
+    _TELEMETRY_MENU_RECT = pygame.Rect(
+        btn_rect.centerx - btn_w // 2,
+        btn_rect.bottom + 10,
+        btn_w,
+        btn_h,
+    )
+    if (_STATICS_BTN_CACHE is None
+            or _STATICS_BTN_CACHE[0] != (btn_w, btn_h)):
+        _STATICS_BTN_CACHE = (
+            (btn_w, btn_h),
+            _build_statics_button(btn_w, btn_h, hovering=False),
+            _build_statics_button(btn_w, btn_h, hovering=True),
+        )
+    hover_tel = _TELEMETRY_MENU_RECT.collidepoint(mouse_pos)
+    statics_surf = _STATICS_BTN_CACHE[2] if hover_tel else _STATICS_BTN_CACHE[1]
+    win.blit(statics_surf, _TELEMETRY_MENU_RECT.topleft)
 
     pygame.display.update()
 

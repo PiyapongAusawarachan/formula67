@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -985,23 +985,264 @@ def _render_dashboard(payload, race, coverage):
 #   "-[NSApplication macOSVersion]: unrecognized selector"
 # pygame is already a project dependency, so re-using it keeps things simple.
 # ---------------------------------------------------------------------------
+class EmbeddedTelemetryViewer:
+    """Scrollable telemetry PNG drawn into the existing game window."""
+
+    TOP_BAR = 44
+
+    def __init__(
+            self,
+            png_path: str,
+            race_ids: List[int],
+            current_race: int,
+            render_fn: Callable[[int], Optional[str]],
+            *,
+            standalone: bool = False,
+    ):
+        import pygame
+        self._pg = pygame
+        self.png_path = png_path
+        self.race_ids = list(sorted(race_ids))
+        self.current_race = int(current_race)
+        self.render_fn = render_fn
+        self.standalone = standalone
+        self.scroll_x = 0
+        self.scroll_y = 0
+        self.dragging = False
+        self.drag_from = (0, 0)
+        self.drag_scroll = (0, 0)
+        self.prev_rect = pygame.Rect(0, 0, 0, 0)
+        self.next_rect = pygame.Rect(0, 0, 0, 0)
+        self.back_rect = pygame.Rect(0, 0, 0, 0)
+        self.bg = (7, 7, 10)
+        self._reload_image()
+
+    def _reload_image(self):
+        self.img = self._pg.image.load(self.png_path)
+        self.img_w, self.img_h = self.img.get_size()
+
+    def _font(self, size: int, bold: bool = True, mono: bool = False):
+        try:
+            fams = ("Menlo,Consolas,Courier New,monospace" if mono
+                    else "Helvetica Neue,Arial,Helvetica,sans-serif")
+            return self._pg.font.SysFont(fams, size, bold=bold)
+        except Exception:
+            return self._pg.font.Font(None, size + 2)
+
+    def _max_scroll(self, win_w: int, win_h: int):
+        view_h = max(1, win_h - self.TOP_BAR)
+        max_x = max(0, self.img_w - win_w)
+        max_y = max(0, self.img_h - view_h)
+        return max_x, max_y
+
+    def _clamp_scroll(self, win_w: int, win_h: int):
+        max_x, max_y = self._max_scroll(win_w, win_h)
+        self.scroll_x = max(0, min(max_x, self.scroll_x))
+        self.scroll_y = max(0, min(max_y, self.scroll_y))
+
+    def _switch_race(self, delta: int):
+        if not self.race_ids:
+            return
+        try:
+            idx = self.race_ids.index(self.current_race)
+        except ValueError:
+            idx = len(self.race_ids) - 1
+        new_idx = max(0, min(len(self.race_ids) - 1, idx + delta))
+        if self.race_ids[new_idx] == self.current_race:
+            return
+        new_rid = self.race_ids[new_idx]
+        if self.render_fn(new_rid):
+            self._reload_image()
+            self.current_race = new_rid
+            self.scroll_y = 0
+
+    def handle_event(self, event) -> Optional[str]:
+        """Return ``\"pop\"`` to leave the viewer (back to menu / results)."""
+        pygame = self._pg
+        if event.type == pygame.QUIT:
+            return None
+        surf = pygame.display.get_surface()
+        if surf is None:
+            return None
+        win_w, win_h = surf.get_size()
+        step = 60
+        page = max(1, (win_h - self.TOP_BAR) - 80)
+
+        if event.type == pygame.VIDEORESIZE and self.standalone:
+            pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_F11:
+                pygame.display.toggle_fullscreen()
+                return None
+            if event.key in (pygame.K_ESCAPE, pygame.K_q, pygame.K_BACKSPACE):
+                return "pop"
+            if event.key == pygame.K_LEFT:
+                self._switch_race(-1)
+            elif event.key == pygame.K_RIGHT:
+                self._switch_race(1)
+            elif event.key == pygame.K_DOWN:
+                self.scroll_y += step
+            elif event.key == pygame.K_UP:
+                self.scroll_y -= step
+            elif event.key in (pygame.K_PAGEDOWN, pygame.K_SPACE):
+                self.scroll_y += page
+            elif event.key == pygame.K_PAGEUP:
+                self.scroll_y -= page
+            elif event.key == pygame.K_HOME:
+                self.scroll_y = 0
+            elif event.key == pygame.K_END:
+                self.scroll_y = self.img_h
+        elif event.type == pygame.MOUSEWHEEL:
+            if pygame.key.get_mods() & pygame.KMOD_SHIFT:
+                self.scroll_x -= event.y * 60
+            else:
+                self.scroll_y -= event.y * 60
+            self.scroll_x -= getattr(event, "x", 0) * 60
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            pos = event.pos
+            if self.back_rect.collidepoint(pos):
+                return "pop"
+            if self.prev_rect.collidepoint(pos):
+                self._switch_race(-1)
+            elif self.next_rect.collidepoint(pos):
+                self._switch_race(1)
+            elif pos[1] > self.TOP_BAR:
+                self.dragging = True
+                self.drag_from = pos
+                self.drag_scroll = (self.scroll_x, self.scroll_y)
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self.dragging = False
+        elif event.type == pygame.MOUSEMOTION and self.dragging:
+            mx, my = event.pos
+            self.scroll_x = self.drag_scroll[0] + (self.drag_from[0] - mx)
+            self.scroll_y = self.drag_scroll[1] + (self.drag_from[1] - my)
+
+        self._clamp_scroll(win_w, win_h)
+        return None
+
+    def _draw_top_bar(self, target: "pygame.Surface", win_w: int, win_h: int):
+        pygame = self._pg
+        TOP_BAR = self.TOP_BAR
+        bar = pygame.Surface((win_w, TOP_BAR), pygame.SRCALPHA)
+        bar.fill((12, 12, 20, 245))
+        pygame.draw.rect(bar, (225, 6, 0), (0, TOP_BAR - 2, win_w, 2))
+
+        f_label = self._font(9, bold=True)
+        f_big = self._font(18, bold=True)
+        f_tip = self._font(10, bold=True, mono=True)
+
+        bf = self._font(13, bold=True)
+        back_txt = bf.render("BACK", True, (255, 255, 255))
+        pad_x = 10
+        self.back_rect = pygame.Rect(
+            8, (TOP_BAR - back_txt.get_height() - 8) // 2,
+            back_txt.get_width() + pad_x * 2, back_txt.get_height() + 8)
+        pygame.draw.rect(bar, (180, 40, 20), self.back_rect, border_radius=6)
+        bar.blit(back_txt,
+                 (self.back_rect.centerx - back_txt.get_width() // 2,
+                  self.back_rect.centery - back_txt.get_height() // 2))
+
+        bx = self.back_rect.right + 14
+        brand = f_big.render("FORMULA 67", True, (230, 230, 235))
+        bar.blit(brand, (bx, 10))
+        acc = f_label.render("TELEMETRY", True, (150, 150, 165))
+        bar.blit(acc, (bx + brand.get_width() + 12, 18))
+
+        if self.race_ids:
+            try:
+                idx = self.race_ids.index(self.current_race)
+            except ValueError:
+                idx = len(self.race_ids) - 1
+            total = len(self.race_ids)
+            has_prev = idx > 0
+            has_next = idx < total - 1
+
+            label_txt = f_label.render("ROUND", True, (150, 150, 165))
+            value_txt = f_big.render(
+                f"{self.current_race:02d}", True, (255, 220, 80))
+            meta_txt = f_tip.render(f"{idx + 1} / {total}",
+                                    True, (140, 140, 155))
+
+            arrow_size = 26
+            gap = 10
+            group_w = (arrow_size + gap + label_txt.get_width() + 6
+                       + value_txt.get_width() + gap
+                       + meta_txt.get_width() + gap + arrow_size)
+            group_x = max(self.back_rect.right + 8, (win_w - group_w) // 2)
+            cy = TOP_BAR // 2
+
+            self.prev_rect = pygame.Rect(group_x, cy - arrow_size // 2,
+                                           arrow_size, arrow_size)
+            prev_col = (225, 6, 0) if has_prev else (60, 60, 72)
+            pygame.draw.rect(bar, prev_col, self.prev_rect, border_radius=6)
+            pts = [(self.prev_rect.right - 9, self.prev_rect.top + 6),
+                   (self.prev_rect.left + 9, self.prev_rect.centery),
+                   (self.prev_rect.right - 9, self.prev_rect.bottom - 6)]
+            pygame.draw.polygon(bar, (255, 255, 255), pts)
+
+            lx = self.prev_rect.right + gap
+            bar.blit(label_txt, (lx, cy - label_txt.get_height() // 2 - 2))
+            lx += label_txt.get_width() + 6
+            bar.blit(value_txt, (lx, cy - value_txt.get_height() // 2))
+            lx += value_txt.get_width() + gap
+            bar.blit(meta_txt, (lx, cy - meta_txt.get_height() // 2))
+            lx += meta_txt.get_width() + gap
+
+            self.next_rect = pygame.Rect(lx, cy - arrow_size // 2,
+                                         arrow_size, arrow_size)
+            next_col = (225, 6, 0) if has_next else (60, 60, 72)
+            pygame.draw.rect(bar, next_col, self.next_rect, border_radius=6)
+            pts = [(self.next_rect.left + 9, self.next_rect.top + 6),
+                   (self.next_rect.right - 9, self.next_rect.centery),
+                   (self.next_rect.left + 9, self.next_rect.bottom - 6)]
+            pygame.draw.polygon(bar, (255, 255, 255), pts)
+        else:
+            self.prev_rect = pygame.Rect(0, 0, 0, 0)
+            self.next_rect = pygame.Rect(0, 0, 0, 0)
+
+        hint = ("← →  round   wheel  scroll   Esc  back" if not self.standalone
+                else "← →  round   wheel  scroll   Esc  exit")
+        hint_txt = f_tip.render(hint, True, (160, 160, 175))
+        bar.blit(hint_txt,
+                 (win_w - hint_txt.get_width() - 8,
+                  TOP_BAR // 2 - hint_txt.get_height() // 2))
+
+        target.blit(bar, (0, 0))
+
+    def draw(self, surface) -> None:
+        pygame = self._pg
+        win_w, win_h = surface.get_size()
+        self._clamp_scroll(win_w, win_h)
+        surface.fill(self.bg)
+
+        off_x = max(0, (win_w - self.img_w) // 2) - self.scroll_x
+        off_y = self.TOP_BAR - self.scroll_y
+        surface.blit(self.img, (off_x, off_y))
+
+        _, max_y = self._max_scroll(win_w, win_h)
+        if max_y > 0:
+            view_h = win_h - self.TOP_BAR
+            track_w = 8
+            track_x = win_w - track_w - 2
+            pygame.draw.rect(surface, (30, 30, 38),
+                             (track_x, self.TOP_BAR, track_w, view_h))
+            thumb_h = max(30, int(view_h * view_h / self.img_h))
+            thumb_y = (self.TOP_BAR
+                       + int((view_h - thumb_h) * self.scroll_y / max_y))
+            pygame.draw.rect(surface, (225, 6, 0),
+                             (track_x, thumb_y, track_w, thumb_h),
+                             border_radius=3)
+
+        self._draw_top_bar(surface, win_w, win_h)
+
+
 def _show_in_pygame_window(
         png_path: str,
         title: str = "Formula 67 · Telemetry Dashboard",
         race_ids: Optional[List[int]] = None,
         current_race: Optional[int] = None,
         render_fn: Optional[Callable[[int], Optional[str]]] = None):
-    """Resizable, scrollable dashboard viewer with round switching.
-
-    Parameters
-    ----------
-    race_ids : list[int]
-        All available race ids for the ◀/▶ selector.
-    current_race : int
-        The race id currently rendered.
-    render_fn : callable(int) -> str
-        Re-renders a PNG for the given race id and returns the path.
-    """
+    """Resizable, scrollable dashboard viewer with round switching."""
     try:
         import pygame
     except Exception as exc:
@@ -1018,258 +1259,38 @@ def _show_in_pygame_window(
     except Exception:
         pass
 
-    race_ids = list(race_ids) if race_ids else []
-    race_ids.sort()
-    if current_race is None and race_ids:
-        current_race = race_ids[-1]
+    rids = list(race_ids) if race_ids else []
+    rids.sort()
+    cur = current_race if current_race is not None else (
+        rids[-1] if rids else 0)
 
-    def _load_img():
-        try:
-            return pygame.image.load(png_path)
-        except Exception as exc:
-            print(f"[visualize] could not load {png_path}: {exc}")
-            return None
-
-    img = _load_img()
-    if img is None:
-        pygame.display.quit()
-        return
-    img_w, img_h = img.get_size()
+    viewer = EmbeddedTelemetryViewer(
+        png_path, rids, cur, render_fn or (lambda _r: None),
+        standalone=True,
+    )
+    img_w, img_h = viewer.img_w, viewer.img_h
 
     info = pygame.display.Info()
     screen_w = info.current_w or 1600
     screen_h = info.current_h or 900
     win_w = min(img_w, max(900, screen_w - 120))
-    win_h = min(img_h + 44, max(640, screen_h - 160))
+    win_h = min(img_h + EmbeddedTelemetryViewer.TOP_BAR,
+                max(640, screen_h - 160))
 
-    TOP_BAR = 44
     flags = pygame.RESIZABLE
-    screen = pygame.display.set_mode((win_w, win_h), flags)
+    pygame.display.set_mode((win_w, win_h), flags)
     pygame.display.set_caption(title)
 
     clock = pygame.time.Clock()
-    bg = (7, 7, 10)
-
-    def _font(size, bold=True, mono=False):
-        try:
-            fams = ("Menlo,Consolas,Courier New,monospace" if mono
-                    else "Helvetica Neue,Arial,Helvetica,sans-serif")
-            return pygame.font.SysFont(fams, size, bold=bold)
-        except Exception:
-            return pygame.font.Font(None, size + 2)
-
-    scroll_x = 0
-    scroll_y = 0
-    dragging = False
-    drag_from = (0, 0)
-    drag_scroll = (0, 0)
-    busy_msg = ""
-    busy_since = 0
-
-    prev_rect = pygame.Rect(0, 0, 0, 0)
-    next_rect = pygame.Rect(0, 0, 0, 0)
-
-    def _clamp_scroll():
-        nonlocal scroll_x, scroll_y
-        content_h = img_h
-        view_h = max(1, win_h - TOP_BAR)
-        max_x = max(0, img_w - win_w)
-        max_y = max(0, content_h - view_h)
-        scroll_x = max(0, min(max_x, scroll_x))
-        scroll_y = max(0, min(max_y, scroll_y))
-        return max_x, max_y
-
-    def _switch_race(delta: int):
-        """Switch to another race id by index delta (-1 or +1)."""
-        nonlocal img, img_w, img_h, current_race, scroll_y, busy_msg, busy_since
-        if not race_ids or render_fn is None or current_race is None:
-            return
-        try:
-            idx = race_ids.index(current_race)
-        except ValueError:
-            idx = len(race_ids) - 1
-        new_idx = max(0, min(len(race_ids) - 1, idx + delta))
-        if race_ids[new_idx] == current_race:
-            return
-        new_rid = race_ids[new_idx]
-        busy_msg = f"Loading round {new_rid:02d}…"
-        busy_since = pygame.time.get_ticks()
-
-        _draw_frame(loading=True)
-        pygame.display.flip()
-
-        new_path = render_fn(new_rid)
-        if new_path:
-            new_img = _load_img()
-            if new_img is not None:
-                img = new_img
-                img_w, img_h = img.get_size()
-                current_race = new_rid
-                scroll_y = 0
-        busy_msg = ""
-
-    def _draw_top_bar():
-        nonlocal prev_rect, next_rect
-        bar = pygame.Surface((win_w, TOP_BAR), pygame.SRCALPHA)
-        bar.fill((12, 12, 20, 245))
-        pygame.draw.rect(bar, (225, 6, 0), (0, TOP_BAR - 2, win_w, 2))
-
-        f_label = _font(9, bold=True)
-        f_big = _font(18, bold=True)
-        f_tip = _font(10, bold=True, mono=True)
-
-        brand = f_big.render("FORMULA 67", True, (230, 230, 235))
-        bar.blit(brand, (16, 10))
-        acc = f_label.render("TELEMETRY DASHBOARD", True, (150, 150, 165))
-        bar.blit(acc, (16 + brand.get_width() + 12, 18))
-
-        if race_ids and current_race is not None:
-            try:
-                idx = race_ids.index(current_race)
-            except ValueError:
-                idx = len(race_ids) - 1
-            total = len(race_ids)
-            has_prev = idx > 0
-            has_next = idx < total - 1
-
-            label_txt = f_label.render("ROUND", True, (150, 150, 165))
-            value_txt = f_big.render(
-                f"{current_race:02d}", True, (255, 220, 80))
-            meta_txt = f_tip.render(f"{idx + 1} / {total}",
-                                    True, (140, 140, 155))
-
-            arrow_size = 26
-            gap = 10
-            group_w = (arrow_size + gap + label_txt.get_width() + 6
-                       + value_txt.get_width() + gap
-                       + meta_txt.get_width() + gap + arrow_size)
-            group_x = max(16, (win_w - group_w) // 2)
-            cy = TOP_BAR // 2
-
-            prev_rect = pygame.Rect(group_x, cy - arrow_size // 2,
-                                    arrow_size, arrow_size)
-            prev_col = (225, 6, 0) if has_prev else (60, 60, 72)
-            pygame.draw.rect(bar, prev_col, prev_rect, border_radius=6)
-            pts = [(prev_rect.right - 9, prev_rect.top + 6),
-                   (prev_rect.left + 9, prev_rect.centery),
-                   (prev_rect.right - 9, prev_rect.bottom - 6)]
-            pygame.draw.polygon(bar, (255, 255, 255), pts)
-
-            lx = prev_rect.right + gap
-            bar.blit(label_txt, (lx, cy - label_txt.get_height() // 2 - 2))
-            lx += label_txt.get_width() + 6
-            bar.blit(value_txt, (lx, cy - value_txt.get_height() // 2))
-            lx += value_txt.get_width() + gap
-            bar.blit(meta_txt, (lx, cy - meta_txt.get_height() // 2))
-            lx += meta_txt.get_width() + gap
-
-            next_rect = pygame.Rect(lx, cy - arrow_size // 2,
-                                    arrow_size, arrow_size)
-            next_col = (225, 6, 0) if has_next else (60, 60, 72)
-            pygame.draw.rect(bar, next_col, next_rect, border_radius=6)
-            pts = [(next_rect.left + 9, next_rect.top + 6),
-                   (next_rect.right - 9, next_rect.centery),
-                   (next_rect.left + 9, next_rect.bottom - 6)]
-            pygame.draw.polygon(bar, (255, 255, 255), pts)
-        else:
-            prev_rect = pygame.Rect(0, 0, 0, 0)
-            next_rect = pygame.Rect(0, 0, 0, 0)
-
-        hint_txt = f_tip.render(
-            "← →  round    ↑ ↓ wheel  scroll    Esc  exit",
-            True, (160, 160, 175))
-        bar.blit(hint_txt,
-                 (win_w - hint_txt.get_width() - 16,
-                  TOP_BAR // 2 - hint_txt.get_height() // 2))
-
-        screen.blit(bar, (0, 0))
-
-    def _draw_frame(loading: bool = False):
-        screen.fill(bg)
-
-        off_x = max(0, (win_w - img_w) // 2) - scroll_x
-        off_y = TOP_BAR - scroll_y
-        screen.blit(img, (off_x, off_y))
-
-        _, max_y = _clamp_scroll()
-        if max_y > 0:
-            view_h = win_h - TOP_BAR
-            track_w = 8
-            track_x = win_w - track_w - 2
-            pygame.draw.rect(screen, (30, 30, 38),
-                             (track_x, TOP_BAR, track_w, view_h))
-            thumb_h = max(30, int(view_h * view_h / img_h))
-            thumb_y = TOP_BAR + int((view_h - thumb_h) * scroll_y / max_y)
-            pygame.draw.rect(screen, (225, 6, 0),
-                             (track_x, thumb_y, track_w, thumb_h),
-                             border_radius=3)
-
-        _draw_top_bar()
-
-        if loading:
-            overlay = pygame.Surface((win_w, win_h), pygame.SRCALPHA)
-            overlay.fill((8, 8, 12, 180))
-            screen.blit(overlay, (0, 0))
-            f = _font(22, bold=True)
-            txt = f.render(busy_msg or "Rendering…",
-                           True, (255, 220, 80))
-            screen.blit(txt, ((win_w - txt.get_width()) // 2,
-                              (win_h - txt.get_height()) // 2))
-
     running = True
     while running:
-        step = 60
-        page = max(1, (win_h - TOP_BAR) - 80)
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 running = False
-            elif ev.type == pygame.VIDEORESIZE:
-                win_w, win_h = ev.w, ev.h
-                screen = pygame.display.set_mode((win_w, win_h), flags)
-            elif ev.type == pygame.KEYDOWN:
-                if ev.key in (pygame.K_ESCAPE, pygame.K_q):
-                    running = False
-                elif ev.key == pygame.K_LEFT:
-                    _switch_race(-1)
-                elif ev.key == pygame.K_RIGHT:
-                    _switch_race(+1)
-                elif ev.key == pygame.K_DOWN:
-                    scroll_y += step
-                elif ev.key == pygame.K_UP:
-                    scroll_y -= step
-                elif ev.key == pygame.K_PAGEDOWN or ev.key == pygame.K_SPACE:
-                    scroll_y += page
-                elif ev.key == pygame.K_PAGEUP:
-                    scroll_y -= page
-                elif ev.key == pygame.K_HOME:
-                    scroll_y = 0
-                elif ev.key == pygame.K_END:
-                    scroll_y = img_h
-            elif ev.type == pygame.MOUSEWHEEL:
-                if pygame.key.get_mods() & pygame.KMOD_SHIFT:
-                    scroll_x -= ev.y * 60
-                else:
-                    scroll_y -= ev.y * 60
-                scroll_x -= ev.x * 60
-            elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
-                pos = pygame.mouse.get_pos()
-                if prev_rect.collidepoint(pos):
-                    _switch_race(-1)
-                elif next_rect.collidepoint(pos):
-                    _switch_race(+1)
-                elif pos[1] > TOP_BAR:
-                    dragging = True
-                    drag_from = pos
-                    drag_scroll = (scroll_x, scroll_y)
-            elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1:
-                dragging = False
-            elif ev.type == pygame.MOUSEMOTION and dragging:
-                mx, my = pygame.mouse.get_pos()
-                scroll_x = drag_scroll[0] + (drag_from[0] - mx)
-                scroll_y = drag_scroll[1] + (drag_from[1] - my)
-
-        _clamp_scroll()
-        _draw_frame()
+            elif viewer.handle_event(ev) == "pop":
+                running = False
+        screen = pygame.display.get_surface()
+        viewer.draw(screen)
         pygame.display.flip()
         clock.tick(60)
 
@@ -1282,34 +1303,25 @@ def _show_in_pygame_window(
 # ---------------------------------------------------------------------------
 # Public API + CLI
 # ---------------------------------------------------------------------------
-def generate_report(stats_dir: str = "stats",
-                    out_dir: str = "reports",
-                    race_id: Optional[int] = None,
-                    open_browser: bool = False,
-                    show_window: bool = False) -> Optional[str]:
-    """Render the telemetry dashboard.
-
-    Parameters
-    ----------
-    show_window : bool
-        If True, opens the dashboard as a scrollable native window.
-    open_browser : bool
-        Legacy alias for ``show_window``.
-    """
+def _make_telemetry_render_bundle(
+        stats_dir: str,
+        out_dir: str,
+        race_id: Optional[int] = None,
+) -> Optional[Tuple[str, List[int], int, Callable[[int], Optional[str]]]]:
     if not os.path.isdir(stats_dir):
         print(f"[visualize] stats dir not found: {stats_dir}")
         return None
 
-    race_summaries   = _read_csv_df(os.path.join(stats_dir, "race_summary.csv"))
-    laps             = _read_csv_df(os.path.join(stats_dir, "lap_time.csv"))
-    speeds           = _read_csv_df(os.path.join(stats_dir, "speed.csv"))
-    competitors      = _read_csv_df(os.path.join(stats_dir, "competitor.csv"))
-    nitros           = _read_csv_df(os.path.join(stats_dir, "nitro.csv"))
-    steerings        = _read_csv_df(os.path.join(stats_dir, "steering.csv"))
-    nitro_events     = _read_csv_df(os.path.join(stats_dir, "nitro_event.csv"))
+    race_summaries = _read_csv_df(os.path.join(stats_dir, "race_summary.csv"))
+    laps = _read_csv_df(os.path.join(stats_dir, "lap_time.csv"))
+    speeds = _read_csv_df(os.path.join(stats_dir, "speed.csv"))
+    competitors = _read_csv_df(os.path.join(stats_dir, "competitor.csv"))
+    nitros = _read_csv_df(os.path.join(stats_dir, "nitro.csv"))
+    steerings = _read_csv_df(os.path.join(stats_dir, "steering.csv"))
+    nitro_events = _read_csv_df(os.path.join(stats_dir, "nitro_event.csv"))
     collision_events = _read_csv_df(
         os.path.join(stats_dir, "collision_event.csv"))
-    steering_events  = _read_csv_df(
+    steering_events = _read_csv_df(
         os.path.join(stats_dir, "steering_event.csv"))
 
     if race_summaries.empty:
@@ -1330,18 +1342,6 @@ def generate_report(stats_dir: str = "stats",
         print(f"[visualize] race_id {target_id} not found")
         return None
 
-    race = _build_race_payload(
-        race_id=target_id,
-        race_summary_row=rs,
-        laps_r=_filter_race(laps, target_id),
-        speeds_r=_filter_race(speeds, target_id),
-        competitors_r=_filter_race(competitors, target_id),
-        steering_r=_filter_race(steerings, target_id),
-        nitro_events_all=nitro_events,
-        nitro_aggregates=nitros,
-    )
-    race["total_races"] = len(all_race_ids)
-
     coverage = [
         {"label": "Speed Samples",    "count": int(len(speeds)),
          "color": COLORS["cyan"]},
@@ -1355,21 +1355,10 @@ def generate_report(stats_dir: str = "stats",
          "color": COLORS["green"]},
     ]
 
-    payload = {
-        "generated_at": datetime.now().strftime("%a %d %b %Y · %H:%M"),
-        "default_race": target_id,
-        "coverage": coverage,
-        "race": race,
-    }
-
-    want_window = show_window or open_browser
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "telemetry_report.png")
 
-    # Closure captures all loaded DataFrames; the viewer uses it to
-    # re-render a different race when the user clicks ◀ / ▶.
     def _render_to_png(rid: int) -> Optional[str]:
-        """Render the dashboard for ``rid`` to ``out_path`` and return it."""
         rs_row = summary_by_id.get(int(rid))
         if rs_row is None:
             return None
@@ -1397,14 +1386,49 @@ def generate_report(stats_dir: str = "stats",
         return out_path
 
     _render_to_png(target_id)
+    return out_path, all_race_ids, target_id, _render_to_png
 
+
+def build_embedded_telemetry_viewer(
+        stats_dir: str = "stats",
+        out_dir: str = "reports",
+        race_id: Optional[int] = None,
+) -> Optional[EmbeddedTelemetryViewer]:
+    """Build a dashboard viewer for use inside the main game loop."""
+    bundle = _make_telemetry_render_bundle(stats_dir, out_dir, race_id)
+    if bundle is None:
+        return None
+    out_path, all_race_ids, target_id, render_fn = bundle
+    return EmbeddedTelemetryViewer(out_path, all_race_ids, target_id,
+                                   render_fn, standalone=False)
+
+
+def generate_report(stats_dir: str = "stats",
+                    out_dir: str = "reports",
+                    race_id: Optional[int] = None,
+                    open_browser: bool = False,
+                    show_window: bool = False) -> Optional[str]:
+    """Render the telemetry dashboard.
+
+    Parameters
+    ----------
+    show_window : bool
+        If True, opens the dashboard as a scrollable native window.
+    open_browser : bool
+        Legacy alias for ``show_window``.
+    """
+    bundle = _make_telemetry_render_bundle(stats_dir, out_dir, race_id)
+    if bundle is None:
+        return None
+    out_path, all_race_ids, target_id, render_fn = bundle
+    want_window = show_window or open_browser
     if want_window:
         _show_in_pygame_window(
             out_path,
-            title=f"Formula 67 · Telemetry Dashboard",
+            title="Formula 67 · Telemetry Dashboard",
             race_ids=all_race_ids,
             current_race=target_id,
-            render_fn=_render_to_png,
+            render_fn=render_fn,
         )
 
     return out_path

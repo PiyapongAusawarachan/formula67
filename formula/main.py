@@ -46,9 +46,10 @@ from world import (
 )
 
 try:
-    from visualize import generate_report
+    from visualize import build_embedded_telemetry_viewer, generate_report
 except ImportError:
     generate_report = None
+    build_embedded_telemetry_viewer = None
 
 _MENU_BG_SNAPSHOT = None
 _RESULTS_BG_SNAPSHOT = None
@@ -80,6 +81,24 @@ def main():
     new_best = False
     final_standings = []
     countdown_started_at = None
+    telemetry_viewer = None
+    visualization_return = "menu"
+
+    def try_open_visualization(from_state: str):
+        nonlocal telemetry_viewer, visualization_return, state
+        if build_embedded_telemetry_viewer is None:
+            return
+        viewer = build_embedded_telemetry_viewer(
+            stats_dir=asset_path("stats"),
+            out_dir=asset_path("reports"),
+        )
+        if viewer is None:
+            print("[game] No telemetry yet — finish at least one race "
+                  "(stats exported) to view charts.")
+            return
+        telemetry_viewer = viewer
+        visualization_return = from_state
+        state = "visualization"
 
     def begin_countdown():
         nonlocal obstacles, ai_racers, finish_state, last_summary_logged
@@ -124,6 +143,11 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 run = False
+            elif (state == "visualization" and telemetry_viewer is not None):
+                popped = telemetry_viewer.handle_event(event)
+                if popped == "pop":
+                    state = visualization_return
+                    telemetry_viewer = None
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     run = False
@@ -154,6 +178,8 @@ def main():
                         (i + 1) % len(DIFFICULTY_ORDER)]
                 elif state == "menu" and event.key == pygame.K_SPACE:
                     begin_countdown()
+                elif state == "menu" and event.key == pygame.K_v:
+                    try_open_visualization("menu")
                 elif state == "results" and event.key == pygame.K_r:
                     _RESULTS_BG_SNAPSHOT = None
                     screen_results._RESULTS_PANEL_CACHE = None
@@ -173,6 +199,10 @@ def main():
                           and screen_menu._START_BUTTON_RECT.collidepoint(
                               event.pos)):
                         begin_countdown()
+                    elif (screen_menu._TELEMETRY_MENU_RECT is not None
+                          and screen_menu._TELEMETRY_MENU_RECT.collidepoint(
+                              event.pos)):
+                        try_open_visualization("menu")
 
         if state == "menu":
             if _MENU_BG_SNAPSHOT is None:
@@ -184,6 +214,11 @@ def main():
                 _MENU_BG_SNAPSHOT = WIN.copy()
             draw_start_screen(WIN, _MENU_BG_SNAPSHOT, race_manager, leaderboard,
                               selected_difficulty, mouse_pos=mouse_pos)
+            continue
+
+        if state == "visualization" and telemetry_viewer is not None:
+            telemetry_viewer.draw(WIN)
+            pygame.display.flip()
             continue
 
         if state == "countdown":
