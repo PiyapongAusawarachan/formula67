@@ -1,5 +1,5 @@
 # Generated telemetry (optional browser dashboard — large, skews GitHub language stats)
-formula/reports/*.html
+reports/*.html
 
 # macOS
 .DS_Store

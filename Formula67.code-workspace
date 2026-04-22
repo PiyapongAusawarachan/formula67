@@ -1,0 +1,14 @@
+{
+  "folders": [
+    {
+      "name": "Formula 67",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/*.pyc": true
+    }
+  }
+}

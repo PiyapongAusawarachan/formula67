@@ -4,7 +4,7 @@
 
 Arcade racing game with telemetry logging and post-race analysis (Python / pygame).
 
-**All game source code lives in the [`formula/`](formula/) folder** (run install and `main.py` from there).
+**Source code** is at the **repository root** (run `pip install` and `python main.py` from this folder after clone).
 
 ---
 
@@ -36,13 +36,13 @@ The codebase maps to the required class responsibilities as follows:
 
 | Class | Role | Main module |
 |--------|------|-------------|
-| **Car** | Physics and movement (`drive`, `applyFriction`, mask `checkCollision`). | `formula/car.py` (`Car`, `PlayerCar`) |
-| **Track** | Environment, boundaries, finish line, path / checkpoints. | `formula/track.py` (`Track`) |
-| **RaceManager** | Game state and timing (`startRace`, `trackLapTime`, `resetGame`, lap totals). | `formula/race.py` (`RaceManager`) |
-| **Obstacle / NitroPad** | Interactive elements (`onHit`, `render`, AABB where applicable). | `formula/obstacle.py` |
-| **StatsLogger** | Data collection and CSV export (`logFeature`-style APIs, `export_to_csv`). | `formula/stats.py` (`StatsLogger`) |
+| **Car** | Physics and movement (`drive`, `applyFriction`, mask `checkCollision`). | [`car.py`](car.py) (`Car`, `PlayerCar`) |
+| **Track** | Environment, boundaries, finish line, path / checkpoints. | [`track.py`](track.py) (`Track`) |
+| **RaceManager** | Game state and timing (`startRace`, `trackLapTime`, `resetGame`, lap totals). | [`race.py`](race.py) (`RaceManager`) |
+| **Obstacle / NitroPad** | Interactive elements (`onHit`, `render`, AABB where applicable). | [`obstacle.py`](obstacle.py) |
+| **StatsLogger** | Data collection and CSV export (`logFeature`-style APIs, `export_to_csv`). | [`stats.py`](stats.py) (`StatsLogger`) |
 
-Additional types: **AIRacer** (`formula/ai_racer.py`), **Leaderboard** (`formula/stats.py`), UI split across `formula/screen_menu.py`, `formula/screen_results.py`, `formula/hud.py`, `formula/world.py`.
+Additional types: **AIRacer** ([`ai_racer.py`](ai_racer.py)), **Leaderboard** ([`stats.py`](stats.py)), UI split across [`screen_menu.py`](screen_menu.py), [`screen_results.py`](screen_results.py), [`hud.py`](hud.py), [`world.py`](world.py).
 
 ### 3.3 Algorithms involved
 
@@ -64,16 +64,16 @@ Additional types: **AIRacer** (`formula/ai_racer.py`), **Leaderboard** (`formula
 | 4 | **Collision count** (per race / events) | Mistakes and difficulty | Wall + obstacle events | Tables, relation analysis |
 | 5 | **Nitro active duration** (seconds) | Nitro usage efficiency | Nitro bursts from player state | Scatter (e.g. nitro vs speed) |
 
-Sampling is **automatic during gameplay**; accumulating **100+ rows per feature** is done across **multiple races** and/or `formula/seed_data.py` where used.
+Sampling is **automatic during gameplay**; accumulating **100+ rows per feature** is done across **multiple races** and/or [`seed_data.py`](seed_data.py) where used.
 
 ### 4.2 Data recording
 
-- Data is collected **during gameplay** and written under **`formula/stats/`** as **CSV** files.
+- Data is collected **during gameplay** and written under [`stats/`](stats/) as **CSV** files.
 - After each finished race, logs are flushed/exported as configured in `StatsLogger` / `main.py`.
 
 ### 4.3 Analysis report (visualize)
 
-The reporting pipeline (`formula/visualize.py`, output under `formula/reports/`) is aligned with the course expectations:
+The reporting pipeline ([`visualize.py`](visualize.py), output under [`reports/`](reports/)) is aligned with the course expectations:
 
 - **Tables:** e.g. speed summary, steering summary, lap-time statistics (mean, min, max, median, std dev).
 - **Graphs (multiple types, no duplicate type required in one report):** e.g. **line** (speed vs time), **histogram** (speed distribution), **scatter** (nitro vs speed), **pie** (steering left/right share).
@@ -114,7 +114,9 @@ pip install -r requirements.txt
 python main.py
 ```
 
-**Telemetry dashboard (matplotlib; writes PNG under `formula/reports/`, e.g. `telemetry_report.png`):**
+(If the repo is not in a folder named `formula`, `cd` into your clone root first — e.g. `cd ~/Documents/formula` from `Documents`.)
+
+**Telemetry dashboard (matplotlib; writes PNG under `reports/`, e.g. `telemetry_report.png`):**
 
 ```bash
 cd formula
@@ -127,17 +129,16 @@ python visualize.py
 
 | Path | Description |
 |------|-------------|
-| [`formula/main.py`](formula/main.py) | Game loop and state machine |
-| [`formula/settings.py`](formula/settings.py) | Difficulty presets, path geometry, timing |
-| [`formula/assets.py`](formula/assets.py) | Display, fonts, sprites |
-| [`formula/car.py`](formula/car.py) | Car / `PlayerCar` |
-| [`formula/track.py`](formula/track.py), [`obstacle.py`](formula/obstacle.py), [`race.py`](formula/race.py) | Track, obstacles, race manager |
-| [`formula/stats.py`](formula/stats.py) | `StatsLogger`, `Leaderboard`, CSV paths |
-| [`formula/visualize.py`](formula/visualize.py) | Report generation |
-| [`formula/stats/`](formula/stats/) | Runtime CSV telemetry |
-| [`formula/reports/`](formula/reports/) | Generated charts (PNG) |
-
-A copy of this documentation also exists at [`formula/README.md`](formula/README.md).
+| [`main.py`](main.py) | Game loop and state machine |
+| [`settings.py`](settings.py) | Difficulty presets, path geometry, timing |
+| [`assets.py`](assets.py) | Display, fonts, sprites |
+| [`car.py`](car.py) | Car / `PlayerCar` |
+| [`track.py`](track.py), [`obstacle.py`](obstacle.py), [`race.py`](race.py) | Track, obstacles, race manager |
+| [`stats.py`](stats.py) | `StatsLogger`, `Leaderboard`, CSV paths |
+| [`visualize.py`](visualize.py) | Report generation |
+| [`stats/`](stats/) | Runtime CSV telemetry |
+| [`reports/`](reports/) | Generated charts (PNG) |
+| [`ATTRIBUTION.md`](ATTRIBUTION.md) | Image credits (informal list for class) |
 
 ---
 
