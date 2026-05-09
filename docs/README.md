@@ -1,10 +1,10 @@
-# Project documents
+# Project Documents
 
-This folder contains the PDF files required by the project submission guideline.
+This folder contains the document artifacts prepared for the project
+submission.
 
 | File | Purpose |
 |------|---------|
-| `PROJECT_PROPOSAL.pdf` | Original project proposal |
+| `PROJECT_PROPOSAL.pdf` | Original project proposal in PDF format |
 | `UML_Class_Diagram.pdf` | UML class diagram in PDF format |
-| `SUBMISSION_CHECKLIST.md` | Local checklist for final submission readiness |
-
+| `SUBMISSION_CHECKLIST.md` | Local checklist for submission readiness |

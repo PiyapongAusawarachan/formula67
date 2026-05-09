@@ -1,8 +1,8 @@
 # Scripts
 
-Helper scripts for project maintenance.
+This folder contains helper scripts used for project maintenance and submission
+artifacts.
 
 | File | Purpose |
 |------|---------|
-| `build_submission_pdfs.py` | Helper for building or refreshing submission PDF artifacts |
-
+| `build_submission_pdfs.py` | Builds or refreshes the proposal and UML PDF artifacts |

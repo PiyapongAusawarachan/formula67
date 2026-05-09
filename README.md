@@ -1,26 +1,37 @@
 # Formula 67
 
-## Project description
+## Project Information
 
-- **Project by:** Piyapong Ausawarachan  
-- **Course:** Computer Programming II — Software and Knowledge Engineering, Kasetsart University  
-- **Game genre:** Arcade, top-down racing  
-- **What it is:** Python + pygame racer: three laps, AI grid, nitro, obstacles by difficulty. While you play, telemetry goes to `stats/*.csv`; `visualize.py` turns that into `reports/telemetry_report.png`. The long-form write-up (overview, UML, data section) is in [DESCRIPTION.md](DESCRIPTION.md).
+| Item | Detail |
+|------|--------|
+| Project | Formula 67 |
+| Developer | Piyapong Ausawarachan |
+| Course | Computer Programming II, Software and Knowledge Engineering, Kasetsart University |
+| Genre | Top-down arcade racing |
+| Technology | Python, pygame, pandas, matplotlib |
+
+Formula 67 is a three-lap top-down racing game with AI opponents, nitro pads,
+obstacles, difficulty settings, and a telemetry pipeline. During gameplay, race
+data is written to `stats/*.csv`; `visualize.py` then converts those files into
+the report image stored in `reports/telemetry_report.png`. The full project
+description, UML reference, data explanation, and submission notes are provided
+in [DESCRIPTION.md](DESCRIPTION.md).
 
 ---
 
 ## Installation
 
-### Clone
+### Clone the Repository
 
 ```sh
 git clone https://github.com/PiyapongAusawarachan/formula67.git
 cd formula67
 ```
 
-If the folder name differs, `cd` into wherever you cloned it.
+If the repository folder name is different, change into that folder before
+running the next commands.
 
-### Virtual environment + dependencies
+### Virtual Environment and Dependencies
 
 **Windows (cmd / PowerShell):**
 
@@ -40,7 +51,7 @@ pip install -r requirements.txt
 
 ---
 
-## Running guide
+## Running Guide
 
 Activate `.venv` and stay in the **repository root**.
 
@@ -56,64 +67,79 @@ python main.py
 python3 main.py
 ```
 
-**Regenerate the telemetry PNG** (same data your submission screenshots should show):
+**Regenerate the telemetry report image:**
 
 ```sh
 python visualize.py
 ```
 
-On Windows, if `python3` is missing, use `python` for all commands above.
+On Windows installations where `python3` is unavailable, use `python` for the
+same commands.
 
 ---
 
-## Tutorial / usage
+## Usage
 
-1. **`main.py`** — start here.  
-2. **Menu:** click a difficulty card, or press **1 / 2 / 3**, or **← →** / **A D**. **Space** starts the light sequence.  
-3. **Driving:** **WASD** — **W/S** gas / brake, **A/D** steer (arrow keys do the same), **Shift** nitro when the bar has charge. Hit nitro pads on the track.  
-4. Finish **3 laps** crossing the start/finish the right way (same as real circuits: you need sequence + direction the game expects).  
-5. **Results** screen shows order and stats; CSVs on disk update for that race.  
-6. **F11** fullscreen, **Esc** quit.
+1. Run `main.py` from the repository root.
+2. On the menu screen, select a difficulty card with the mouse, press `1`, `2`,
+   or `3`, or use the arrow keys / `A` and `D`. Press `Space` to start the
+   countdown sequence.
+3. Drive with `WASD` or the arrow keys. Use `Shift` for nitro when charge is
+   available.
+4. Complete three valid laps by crossing the start/finish line in the expected
+   direction.
+5. Review the results screen. The race data is exported to CSV after the race.
+6. Press `F11` to toggle fullscreen, or `Esc` to quit.
 
-If `stats/` is thin, you can run `python seed_data.py` once (see that file’s docstring) to bulk-fill demo rows before recording your video.
-
----
-
-## Game features
-
-- Grass collision via **mask**; finish line also mask-based  
-- Obstacles + nitro pads use **bounding boxes** vs the car rect  
-- **3 difficulties** — obstacle count + AI parameters  
-- **HUD:** lap, race time, collision count, position, nitro bar, minimap, speedometer  
-- **Data:** live logging → **CSVs** → **matplotlib** dashboard PNG  
-- **Leaderboard:** `leaderboard.csv` (best laps)
+For demonstration data, run `python seed_data.py` once from the repository root.
+This fills the telemetry folder with additional sample races for the
+visualization report.
 
 ---
 
-## Known bugs
+## Main Features
 
-- Fullscreen + multi-monitor / HiDPI can act weird on some setups; **F11** again or run windowed if needed.  
-- If anything else breaks, note the OS + pygame version — I tested mainly on macOS and standard pygame installs.
-
----
-
-## Unfinished work
-
-- Fancy export formats (PDF report, extra pages) — not required; the course figure is the PNG from `visualize.py`.  
-- **You must** paste your real **YouTube** link into [DESCRIPTION.md](DESCRIPTION.md) before the hard deadline. Gameplay and visualization screenshots are already under `screenshots/`.  
-- GitHub **releases/tags** (`22_Apr_Version`, `10_May_Version`) and the class spreadsheet are on you — I can’t click “submit” for you.
+- Mask-based track border and finish-line collision
+- Obstacles and nitro pads with bounding-box interaction
+- Three difficulty modes with different AI and obstacle settings
+- HUD with lap count, time, hits, position, nitro, minimap, and speedometer
+- Telemetry logging from gameplay to CSV files
+- Matplotlib report generation from recorded telemetry
+- Persistent best-lap leaderboard in `leaderboard.csv`
 
 ---
 
-## External sources
+## Known Issues
 
-- **Libraries:** pygame, matplotlib, pandas — pinned loosely in [requirements.txt](requirements.txt).  
-- **Art / credits:** [ATTRIBUTION.md](ATTRIBUTION.md)  
-- **License:** [LICENSE](LICENSE) (MIT)
+- Fullscreen behavior may vary on multi-monitor or HiDPI displays. If this
+  occurs, press `F11` again or run the game in windowed mode.
+- The project was tested primarily on macOS with a standard pygame
+  installation.
 
 ---
 
-## Repo map
+## Final Submission Notes
+
+- Paste the final YouTube presentation link into [DESCRIPTION.md](DESCRIPTION.md)
+  before submission.
+- Create the required GitHub releases or tags: `22_Apr_Version` and
+  `10_May_Version`.
+- Submit the repository link through the course submission form or spreadsheet.
+- Gameplay and visualization screenshots are already organized under
+  `screenshots/`.
+
+---
+
+## External Sources
+
+- Libraries: pygame, matplotlib, pandas, and numpy; see
+  [requirements.txt](requirements.txt).
+- Art and asset references: [ATTRIBUTION.md](ATTRIBUTION.md).
+- Project license: [LICENSE](LICENSE).
+
+---
+
+## Repository Structure
 
 | Path | Role |
 |------|------|
