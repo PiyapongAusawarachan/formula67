@@ -390,3 +390,7 @@ race_id,name,rank,finish_time_s,best_lap_s,lap_reached
 89,Norris,2,68.079,22.233,4
 89,Hamilton,3,69.314,22.484,4
 89,Russell,4,69.671,22.844,4
+90,You,1,66.132,21.599,3
+90,Norris,2,67.355,22.033,4
+90,Hamilton,3,68.416,22.29,4
+90,Russell,4,69.764,22.664,4
