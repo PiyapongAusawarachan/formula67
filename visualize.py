@@ -1,31 +1,9 @@
-"""Race Telemetry Report - Formula 67 project proposal.
+"""Build charts + tables from the stats CSVs.
 
-Opens a native window (just like the game window) displaying a full
-telemetry dashboard built from the CSV stats produced by
-``StatsLogger.export_to_csv()``.  A PNG snapshot of the same dashboard
-is also written to ``reports/telemetry_report.png`` for archival.
+Also writes ``reports/telemetry_report.png``. Optional: open the PNG in a
+pygame window (see ``python visualize.py --help``).
 
-Strictly follows the academic proposal (4.3 Data Analysis Report):
-
-  *  3 statistical tables (one per feature):
-       Table 1 - Speed Statistics       (Mean / Max / Min / Std Dev)
-       Table 2 - Steering Input Summary (Direction / Count / Percentage)
-       Table 3 - Lap Time Statistics    (Mean / Min / Max / Median / Std Dev)
-
-  *  4 distinct graphs (no repeated type, two categories of data):
-       Graph 1 - Speed vs Time              (Line, time-series)
-       Graph 2 - Speed Distribution         (Histogram)
-       Graph 3 - Nitro Duration vs Speed    (Scatter, multi-race)
-       Graph 4 - Steering Direction         (Pie chart)
-
-Units: speed in pixels per second (px/s), time in seconds.
-
-Run from CLI:
-    python visualize.py                 # opens dashboard as a new window
-    python visualize.py --race-id 5
-    python visualize.py --no-show       # only save PNG, no window
-
-Auto-called from main.py at the end of every race (silent PNG save).
+``main.py`` can call ``generate_report`` after a race with no window.
 """
 from __future__ import annotations
 
@@ -37,10 +15,11 @@ import numpy as np
 import pandas as pd
 
 import matplotlib
-matplotlib.use("Agg")  # render off-screen; the UI is pygame, not Tk.
+matplotlib.use("Agg")  # no Tk needed; we draw with pygame if showing a window
 import matplotlib.pyplot as plt
 from matplotlib import patches
-from matplotlib.patches import FancyBboxPatch, Rectangle
+from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.patches import FancyBboxPatch, Polygon, Rectangle
 
 
 # ---------------------------------------------------------------------------
@@ -48,26 +27,32 @@ from matplotlib.patches import FancyBboxPatch, Rectangle
 # ---------------------------------------------------------------------------
 PX_PER_FRAME_TO_PX_PER_SEC = 60.0
 
+# Bold broadcast / timing UI: saturated accents on dark graphite.
 COLORS = {
-    "bg":         "#07070a",
-    "panel":      "#11111a",
-    "panel_2":    "#15151f",
-    "line":       "#1d1d28",
-    "line_2":     "#2a2a36",
+    "bg":         "#07080f",
+    "panel":      "#0f1018",
+    "panel_2":    "#151622",
+    "panel_deep": "#0c0d12",
+    "line":       "#32334a",
+    "line_2":     "#45456a",
+    "line_dim":   "#252538",
     "text":       "#ffffff",
-    "text_2":     "#d4d4dc",
-    "muted":      "#898997",
-    "dim":        "#585866",
-    "red":        "#e10600",
-    "red_soft":   "#ff2d2d",
-    "gold":       "#ffc300",
-    "green":      "#00d56a",
-    "silver":     "#c4c4cc",
-    "bronze":     "#cd7f32",
-    "cyan":       "#21e6f0",
-    "purple":     "#b14fff",
-    "pink":       "#ff5fa8",
-    "orange":     "#ff8a00",
+    "text_2":     "#d2d6e6",
+    "muted":      "#9aa3c0",
+    "dim":        "#6d7690",
+    "red":        "#ff1a1a",
+    "red_soft":   "#ff6b6b",
+    "red_glow":   "#ff4444",
+    "gold":       "#ffcc00",
+    "green":      "#00e676",
+    "silver":     "#c8ced9",
+    "bronze":     "#ff9f43",
+    "cyan":       "#00e5ff",
+    "purple":     "#b967ff",
+    "pink":       "#ff5c9e",
+    "orange":     "#ff9100",
+    "grid":       "#353550",
+    "chart_face": "#0a0c18",
 }
 DRIVER_COLORS = {
     "Player":      "#ffffff",
@@ -80,7 +65,45 @@ DRIVER_COLORS = {
 
 
 # ---------------------------------------------------------------------------
-# CSV loading + statistics (pandas-based, per proposal requirement)
+# Typography (matplotlib uses the first font in the list that is installed)
+# ---------------------------------------------------------------------------
+_FONT_SANS_STACK = [
+    "Inter",
+    "Inter Variable",
+    "Plus Jakarta Sans",
+    "DM Sans",
+    "IBM Plex Sans",
+    "Segoe UI",
+    "SF Pro Display",
+    "SF Pro Text",
+    ".SF NS Display",
+    ".AppleSystemUIFont",
+    "Helvetica Neue",
+    "Helvetica",
+    "Arial",
+    "Liberation Sans",
+    "DejaVu Sans",
+]
+
+
+def _typography_rc_params() -> dict:
+    return {
+        "font.family": "sans-serif",
+        "font.sans-serif": _FONT_SANS_STACK,
+        "font.size": 10,
+        "font.weight": "normal",
+        "axes.titleweight": "bold",
+        "axes.labelweight": "bold",
+        "figure.dpi": 115,
+        "savefig.dpi": 115,
+        "text.antialiased": True,
+        "lines.antialiased": True,
+        "patch.antialiased": True,
+    }
+
+
+# ---------------------------------------------------------------------------
+# CSV load + pandas helpers
 # ---------------------------------------------------------------------------
 def _read_csv_df(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
@@ -179,6 +202,51 @@ def _build_speed_histogram(speed_df: pd.DataFrame, bins: int = 18):
         return np.array([]), 0.0
     return s.to_numpy(), float(s.max() - s.min())
 
+def _gap_series(gap_df: pd.DataFrame):
+    if gap_df.empty or "timestamp" not in gap_df.columns:
+        return np.array([]), np.array([])
+    df = gap_df.copy()
+    df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
+    df["gap_progress"] = pd.to_numeric(df["gap_progress"], errors="coerce")
+    df = df.dropna(subset=["timestamp", "gap_progress"])
+    if df.empty:
+        return np.array([]), np.array([])
+    t0 = float(df["timestamp"].iloc[0])
+    t = df["timestamp"].to_numpy(dtype=float) - t0
+    g = df["gap_progress"].to_numpy(dtype=float)
+    return t, g
+
+def _position_arrays(pos_df: pd.DataFrame):
+    if pos_df.empty:
+        return np.array([]), np.array([]), np.array([])
+    x = pd.to_numeric(pos_df.get("x"), errors="coerce")
+    y = pd.to_numeric(pos_df.get("y"), errors="coerce")
+    sp = pd.to_numeric(pos_df.get("speed_px_s"), errors="coerce")
+    m = x.notna() & y.notna() & sp.notna()
+    if not m.any():
+        return np.array([]), np.array([]), np.array([])
+    c = (sp[m].to_numpy(dtype=float) * PX_PER_FRAME_TO_PX_PER_SEC)
+    return x[m].to_numpy(), y[m].to_numpy(), c
+
+def _sector_means_for_table(sectors_df: pd.DataFrame) -> List[Tuple[str, str]]:
+    rows = []
+    if sectors_df.empty or "sector_index" not in sectors_df.columns:
+        for seg in (1, 2, 3):
+            rows.append((f"S{seg} mean", "--"))
+        rows.append(("Beacons hit", "0"))
+        return rows
+    sp = pd.to_numeric(sectors_df["split_s"], errors="coerce")
+    si = pd.to_numeric(sectors_df["sector_index"], errors="coerce")
+    tmp = pd.DataFrame({"si": si, "sp": sp}).dropna()
+    hit = len(tmp)
+    for seg in (1, 2, 3):
+        ss = tmp[tmp["si"] == seg]["sp"]
+        rows.append((f"S{seg} mean (s)",
+                     f"{float(ss.mean()):.2f}" if len(ss) else "--"))
+    rows.append(("Beacons hit", f"{hit:,}"))
+    return rows
+
+
 def _build_nitro_scatter(nitro_events: pd.DataFrame,
                          nitro_aggregates: pd.DataFrame):
     use_events = not nitro_events.empty
@@ -206,6 +274,10 @@ def _build_race_payload(
     steering_r: pd.DataFrame,
     nitro_events_all: pd.DataFrame,
     nitro_aggregates: pd.DataFrame,
+    sectors_r: pd.DataFrame,
+    positions_r: pd.DataFrame,
+    gaps_r: pd.DataFrame,
+    cornering_r: pd.DataFrame,
 ) -> Dict:
     speed_stats = _speed_stats(speeds_r)
     lap_stats = _lap_stats(laps_r)
@@ -261,6 +333,11 @@ def _build_race_payload(
         if fastest is None or c["best_lap"] < fastest["best_lap"]:
             fastest = c
 
+    gap_t, gap_g = _gap_series(gaps_r)
+    pos_x, pos_y, pos_c = _position_arrays(positions_r)
+    sector_table_rows = _sector_means_for_table(sectors_r)
+    corner_n = int(len(cornering_r)) if not cornering_r.empty else 0
+
     return {
         "race_id": race_id,
         "lap_count": lap_count,
@@ -284,6 +361,13 @@ def _build_race_payload(
         "speed_samples": speed_samples,
         "nitro_scatter": nitro_scatter,
         "competitors": competitors_payload,
+        "gap_t": gap_t,
+        "gap_g": gap_g,
+        "pos_x": pos_x,
+        "pos_y": pos_y,
+        "pos_c": pos_c,
+        "sector_table_rows": sector_table_rows,
+        "cornering_events": corner_n,
     }
 
 
@@ -294,13 +378,14 @@ SECTION_HEIGHTS = {
     "top_margin":   0.30,
     "header":       1.00,
     "info_bar":     1.10,
-    "coverage":     1.35,
+    "coverage":     2.72,
     "kpi_row":      1.60,
     "sec1_head":    0.55,
-    "stats_tbl":    2.30,
+    "stats_tbl":    2.55,
     "sec2_head":    0.55,
     "charts_r1":    2.80,
     "charts_r2":    2.80,
+    "charts_r3":    2.65,
     "sec3_head":    0.55,
     "standings":    2.70,
     "footer":       0.45,
@@ -309,12 +394,12 @@ SECTION_HEIGHTS = {
 SECTION_ORDER = [
     "top_margin", "header", "info_bar", "coverage", "kpi_row",
     "sec1_head", "stats_tbl",
-    "sec2_head", "charts_r1", "charts_r2",
+    "sec2_head", "charts_r1", "charts_r2", "charts_r3",
     "sec3_head", "standings",
     "footer", "bottom_margin",
 ]
-GAP_INCHES = 0.18
-FIG_WIDTH = 16.0
+GAP_INCHES = 0.22
+FIG_WIDTH = 18.2
 
 def _compute_layout():
     """Return a dict of (y_bottom, height) in figure fraction for each key."""
@@ -338,104 +423,186 @@ def _compute_layout():
 def _driver_color(name: Optional[str]) -> str:
     return DRIVER_COLORS.get(name or "", COLORS["silver"])
 
+
+def _track_speed_cmap():
+    """Vivid trajectory heat: deep blue → cyan → lime → yellow → hot red."""
+    return LinearSegmentedColormap.from_list(
+        "track_spd",
+        ["#0a0f2e", "#0044aa", "#00bcd4", "#76ff03", "#ffea00", "#ff1744",
+         "#ff6d00"],
+    )
+
+
+def _hist_purple_cmap():
+    return LinearSegmentedColormap.from_list(
+        "hist_pri",
+        ["#1a0a2e", "#5e00c4", COLORS["purple"], "#e040fb", "#f8b6ff"],
+    )
+
+
+def _coverage_row_groups(items: List) -> List[List]:
+    """Split channel cards into rows for readable card height and width.
+
+    Fewer cards per row = wider tiles; balanced row counts avoid one stub row.
+    """
+    n = len(items)
+    if n <= 4:
+        return [items]
+    if n <= 8:
+        mid = (n + 1) // 2
+        return [items[:mid], items[mid:]]
+    if n <= 12:
+        nrows = 3
+        base, rem = divmod(n, nrows)
+        out, i = [], 0
+        for r in range(nrows):
+            take = base + (1 if r < rem else 0)
+            out.append(items[i:i + take])
+            i += take
+        return out
+    per = 4
+    return [items[i:i + per] for i in range(0, n, per)]
+
+
+def _axes_depth_gradient(ax, zorder: float = 0.5):
+    """Panel sheen — visible but not flat."""
+    arr = np.linspace(0, 1, 80, dtype=float).reshape(-1, 1)
+    arr = np.repeat(arr, 200, axis=1)
+    cmap = LinearSegmentedColormap.from_list(
+        "panel_depth",
+        [(0.0, "#080914"), (0.45, "#12152a"), (1.0, "#1c2040")],
+    )
+    ax.imshow(
+        arr, extent=[0, 1, 0, 1], transform=ax.transAxes,
+        aspect="auto", origin="upper", zorder=zorder,
+        cmap=cmap, alpha=0.38, interpolation="bilinear",
+    )
+
+
 def _hide_axes(ax):
     ax.set_xticks([]); ax.set_yticks([])
     for spine in ax.spines.values():
         spine.set_visible(False)
     ax.set_facecolor("none")
 
+
 def _panel_axes(fig, rect, facecolor=None, accent=None):
-    """Create a styled panel axes at ``rect = (x, y, w, h)`` (figure frac)."""
+    """Minimal panel; optional left accent bar."""
     ax = fig.add_axes(rect)
     _hide_axes(ax); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    fc = facecolor or COLORS["panel"]
     ax.add_patch(Rectangle(
         (0, 0), 1, 1, transform=ax.transAxes,
-        facecolor=facecolor or COLORS["panel"],
-        edgecolor=COLORS["line"], lw=1))
+        facecolor=fc,
+        edgecolor=COLORS["line"], lw=0.4))
     if accent:
         ax.add_patch(Rectangle(
-            (0, 0), 0.005, 1, transform=ax.transAxes,
-            facecolor=accent, edgecolor="none"))
+            (0, 0), 0.003, 1, transform=ax.transAxes,
+            facecolor=accent, edgecolor="none", zorder=5))
     return ax
 
 def _section_header(fig, rect, number: str, title: str, subtitle: str = ""):
     ax = fig.add_axes(rect)
     _hide_axes(ax); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
-    ax.add_patch(Rectangle((0.0, 0.18), 0.038, 0.64,
-                           transform=ax.transAxes,
-                           facecolor=COLORS["red"], edgecolor="none"))
-    ax.text(0.019, 0.50, number, transform=ax.transAxes,
+    ax.add_patch(Rectangle(
+        (0, 0), 1, 1, transform=ax.transAxes,
+        facecolor=COLORS["panel_2"], edgecolor="none", alpha=0.55,
+        zorder=0))
+    ax.plot([0.012, 0.012], [0.26, 0.74], color=COLORS["red"], lw=1.65,
+            transform=ax.transAxes, solid_capstyle="butt", zorder=2)
+    ax.add_patch(FancyBboxPatch(
+        (0.022, 0.36), 0.036, 0.28, transform=ax.transAxes,
+        boxstyle="round,pad=0,rounding_size=0.008",
+        facecolor=COLORS["panel"], edgecolor=COLORS["line"],
+        lw=0.35, zorder=1))
+    ax.text(0.040, 0.50, number, transform=ax.transAxes,
             ha="center", va="center",
-            color="#fff", fontsize=13, fontweight="bold", style="italic")
-    ax.text(0.048, 0.60, title.upper(), transform=ax.transAxes,
+            color=COLORS["text_2"], fontsize=10.5, fontweight="bold",
+            zorder=2)
+    ax.text(0.068, 0.58, title, transform=ax.transAxes,
             ha="left", va="center",
-            color=COLORS["text"], fontsize=13, fontweight="bold")
+            color=COLORS["text"], fontsize=13.2, fontweight="bold",
+            zorder=2)
     if subtitle:
-        ax.text(0.048, 0.28, subtitle.upper(), transform=ax.transAxes,
+        ax.text(0.068, 0.34, subtitle, transform=ax.transAxes,
                 ha="left", va="center",
-                color=COLORS["muted"], fontsize=8.5, fontweight="bold",
-                family="monospace")
-    ax.plot([0.30, 1.0], [0.50, 0.50],
-            color=COLORS["line"], lw=0.8, transform=ax.transAxes)
-    ax.plot([0.30, 0.36], [0.50, 0.50],
-            color=COLORS["red"], lw=1.6, transform=ax.transAxes)
+                color=COLORS["muted"], fontsize=8.4, fontweight="bold",
+                zorder=2)
+    ax.plot([0.265, 0.995], [0.50, 0.50],
+            color=COLORS["line"], lw=0.42, transform=ax.transAxes, zorder=2)
 
 def _draw_header(fig, rect, payload):
     x, y, w, h = rect
-    ax = _panel_axes(fig, rect, facecolor=COLORS["panel"])
+    ax = fig.add_axes(rect)
+    _hide_axes(ax); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    ax.set_facecolor(COLORS["panel"])
+    ax.add_patch(Rectangle(
+        (0, 0), 1, 1, transform=ax.transAxes,
+        facecolor=COLORS["panel"], edgecolor=COLORS["line"], lw=0.4,
+        zorder=0))
+    _axes_depth_gradient(ax, zorder=1)
 
-    ax.add_patch(Rectangle((0, 0.95), 1, 0.05, transform=ax.transAxes,
-                           facecolor=COLORS["red"], edgecolor="none"))
+    ax.plot([0, 1], [0.996, 0.996], color=COLORS["red"], lw=2.2,
+            transform=ax.transAxes, clip_on=False, solid_capstyle="butt",
+            zorder=4)
 
-    ax.add_patch(Rectangle((0.015, 0.20), 0.028, 0.55,
-                           transform=ax.transAxes,
-                           facecolor=COLORS["red"], edgecolor="none"))
-    ax.text(0.029, 0.475, "F", transform=ax.transAxes,
-            ha="center", va="center", color="#fff",
-            fontsize=22, fontweight="bold", style="italic")
-    ax.add_patch(Rectangle((0.045, 0.20), 0.028, 0.55,
-                           transform=ax.transAxes,
-                           facecolor="#fff", edgecolor="none"))
-    ax.text(0.059, 0.475, "67", transform=ax.transAxes,
-            ha="center", va="center", color="#000",
-            fontsize=17, fontweight="bold", style="italic")
+    ax.add_patch(Polygon(
+        [(0.098, 0.20), (0.108, 0.78), (0.102, 0.78), (0.092, 0.20)],
+        closed=True, transform=ax.transAxes,
+        facecolor=COLORS["red"], edgecolor="none", alpha=0.78, zorder=2))
 
-    ax.text(0.090, 0.60, "FORMULA 67", transform=ax.transAxes,
+    ax.add_patch(FancyBboxPatch(
+        (0.018, 0.24), 0.036, 0.52, transform=ax.transAxes,
+        boxstyle="round,pad=0,rounding_size=0.014",
+        facecolor=COLORS["red"], edgecolor="none", zorder=3))
+    ax.text(0.036, 0.50, "F", transform=ax.transAxes,
+            ha="center", va="center", color="#ffffff",
+            fontsize=20, fontweight="bold", style="italic", zorder=4)
+    ax.add_patch(FancyBboxPatch(
+        (0.056, 0.24), 0.036, 0.52, transform=ax.transAxes,
+        boxstyle="round,pad=0,rounding_size=0.014",
+        facecolor="#e8e8ee", edgecolor=COLORS["line"], lw=0.35, zorder=3))
+    ax.text(0.074, 0.50, "67", transform=ax.transAxes,
+            ha="center", va="center", color=COLORS["bg"],
+            fontsize=15, fontweight="bold", style="italic", zorder=4)
+
+    ax.text(0.116, 0.595, "FORMULA 67", transform=ax.transAxes,
             ha="left", va="center",
-            color=COLORS["text"], fontsize=19, fontweight="bold")
-    ax.add_patch(Rectangle((0.090, 0.33), 0.013, 0.010,
-                           transform=ax.transAxes,
-                           facecolor=COLORS["red"], edgecolor="none"))
-    ax.text(0.108, 0.33, "RACE CONTROL  ·  LIVE TIMING & TELEMETRY",
-            transform=ax.transAxes, ha="left", va="center",
-            color=COLORS["muted"], fontsize=8.5, fontweight="bold")
-
-    ax.add_patch(Rectangle((0.740, 0.42), 0.068, 0.22,
-                           transform=ax.transAxes,
-                           facecolor=COLORS["red"], edgecolor="none"))
-    ax.text(0.774, 0.53, "LIVE", transform=ax.transAxes,
-            ha="center", va="center",
-            color="#fff", fontsize=10, fontweight="bold", style="italic")
-    ax.text(0.820, 0.60, "GENERATED", transform=ax.transAxes,
+            color=COLORS["text"], fontsize=20.5, fontweight="bold",
+            style="italic", zorder=4)
+    ax.text(0.116, 0.34, "Race control", transform=ax.transAxes,
             ha="left", va="center",
-            color=COLORS["muted"], fontsize=8, fontweight="bold")
-    ax.text(0.820, 0.40, payload["generated_at"],
-            transform=ax.transAxes, ha="left", va="center",
-            family="monospace",
-            color=COLORS["text_2"], fontsize=9.5)
+            color=COLORS["muted"], fontsize=9, fontweight="bold",
+            zorder=4)
+    ax.text(0.202, 0.34, "·", transform=ax.transAxes,
+            ha="left", va="center", color=COLORS["dim"], fontsize=9,
+            zorder=4)
+    ax.text(0.212, 0.34, "Live timing & telemetry", transform=ax.transAxes,
+            ha="left", va="center",
+            color=COLORS["dim"], fontsize=9, fontweight="bold", zorder=4)
+
+    ax.text(0.908, 0.62, "Session", transform=ax.transAxes,
+            ha="right", va="center",
+            color=COLORS["cyan"], fontsize=9, fontweight="bold",
+            zorder=4)
+    ax.text(0.908, 0.36, payload["generated_at"],
+            transform=ax.transAxes, ha="right", va="center",
+            color=COLORS["muted"], fontsize=9,
+            family="monospace", fontweight="bold", zorder=4)
 
 def _draw_info_bar(fig, rect, race):
-    ax = _panel_axes(fig, rect, facecolor=COLORS["panel_2"],
-                     accent=COLORS["red"])
+    ax = fig.add_axes(rect)
+    _hide_axes(ax); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    ax.set_facecolor(COLORS["panel_2"])
+    ax.add_patch(Rectangle(
+        (0, 0), 1, 1, transform=ax.transAxes,
+        facecolor=COLORS["panel_2"], edgecolor=COLORS["line"], lw=0.4,
+        zorder=0))
+    _axes_depth_gradient(ax, zorder=1)
 
-    strip_colors = [COLORS["red"], COLORS["orange"], COLORS["gold"],
-                    COLORS["green"], COLORS["cyan"], COLORS["purple"],
-                    COLORS["pink"]]
-    seg = 1.0 / len(strip_colors)
-    for i, c in enumerate(strip_colors):
-        ax.add_patch(Rectangle((i * seg, 0), seg, 0.035,
-                               transform=ax.transAxes,
-                               facecolor=c, edgecolor="none"))
+    ax.plot([0, 1], [0.933, 0.933], color=COLORS["red"], lw=1.75,
+            transform=ax.transAxes, clip_on=False, solid_capstyle="butt",
+            zorder=3)
 
     winner = next((c for c in race["competitors"] if c.get("rank") == 1),
                   None)
@@ -443,17 +610,17 @@ def _draw_info_bar(fig, rect, race):
 
     cells = [
         ("ROUND",            f"{race['race_id']:02d}",
-         "CURRENT SESSION",   COLORS["red"],   20),
+         "CURRENT SESSION",   COLORS["text"],   20),
         ("WINNER",
          (winner["name"].upper() if winner and winner.get("name") else "--"),
-         (f"{winner['finish_time']:.2f}S  RACE TIME"
+         (f"{winner['finish_time']:.2f} s · race"
           if winner and winner.get("finish_time") else "--"),
          COLORS["gold"], 16),
         ("FASTEST LAP",
          (fastest["name"].upper() if fastest and fastest.get("name") else "--"),
-         (f"{fastest['best_lap']:.3f}S  LAP TIME"
+         (f"{fastest['best_lap']:.3f} s"
           if fastest and fastest.get("best_lap") is not None else "--"),
-         COLORS["purple"], 16),
+         COLORS["text"], 16),
         ("LAPS",     str(race["lap_count"] or "--"),
          "COMPLETED", COLORS["text"], 18),
         ("GRID",     str(len(race["competitors"]) or "--"),
@@ -465,67 +632,164 @@ def _draw_info_bar(fig, rect, race):
     x_cursor = 0.01
     for (label, value, sub, color, vfs), w in zip(cells, widths):
 
-        ax.plot([x_cursor + w - 0.002, x_cursor + w - 0.002],
-                [0.10, 0.92], transform=ax.transAxes,
-                color=COLORS["line"], lw=0.8)
-        ax.text(x_cursor + 0.015, 0.80, label, transform=ax.transAxes,
+        ax.plot([x_cursor + w - 0.001, x_cursor + w - 0.001],
+                [0.11, 0.92], transform=ax.transAxes,
+                color=COLORS["line_dim"], lw=0.48)
+        ax.text(x_cursor + 0.016, 0.79, label, transform=ax.transAxes,
                 ha="left", va="center", color=COLORS["muted"],
-                fontsize=8.5, fontweight="bold")
-        ax.text(x_cursor + 0.015, 0.50, value, transform=ax.transAxes,
+                fontsize=8.6, fontweight="bold")
+        ax.text(x_cursor + 0.016, 0.49, value, transform=ax.transAxes,
                 ha="left", va="center", color=color,
-                fontsize=vfs, fontweight="bold", style="italic")
-        ax.text(x_cursor + 0.015, 0.21, sub, transform=ax.transAxes,
+                fontsize=vfs, fontweight="bold")
+        ax.text(x_cursor + 0.016, 0.21, sub, transform=ax.transAxes,
                 ha="left", va="center", color=COLORS["dim"],
-                fontsize=7.5, family="monospace", fontweight="bold")
+                fontsize=7.7, fontweight="bold")
         x_cursor += w
 
 def _draw_coverage(fig, rect, coverage):
-    ax = _panel_axes(fig, rect, facecolor=COLORS["panel"],
-                     accent=COLORS["red"])
+    ax = fig.add_axes(rect)
+    _hide_axes(ax); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    ax.set_facecolor(COLORS["panel"])
+    ax.add_patch(Rectangle(
+        (0, 0), 1, 1, transform=ax.transAxes,
+        facecolor=COLORS["panel"], edgecolor=COLORS["line"], lw=0.4,
+        zorder=0))
+    _axes_depth_gradient(ax, zorder=1)
 
-    ax.text(0.015, 0.78, "◆  DATA COVERAGE", transform=ax.transAxes,
-            ha="left", va="center", color=COLORS["text"],
-            fontsize=12, fontweight="bold")
-    ax.text(0.015, 0.52, "requirement ≥ 100 records per feature",
-            transform=ax.transAxes, ha="left", va="center",
-            color=COLORS["muted"], fontsize=8.5, family="monospace")
-    ax.text(0.015, 0.28, f"total datasets · {len(coverage)} channels",
-            transform=ax.transAxes, ha="left", va="center",
-            color=COLORS["dim"], fontsize=8, family="monospace",
-            fontweight="bold")
+    ax.plot([0.01, 0.99], [0.993, 0.993], color=COLORS["red"], lw=1.65,
+            transform=ax.transAxes, clip_on=True, solid_capstyle="butt",
+            zorder=4)
 
-    x0 = 0.19
-    gap = 0.012
-    w = (1.0 - x0 - 0.015 - gap * (len(coverage) - 1)) / len(coverage)
-    for i, item in enumerate(coverage):
-        x = x0 + i * (w + gap)
-        count = item["count"]
-        color = item["color"]
-        ok = count >= 100
-        half = count >= 50
-        badge_color = (COLORS["green"] if ok
-                       else (COLORS["gold"] if half else COLORS["red"]))
-        badge_text = "PASS" if ok else f"{count}/100"
-        ax.add_patch(FancyBboxPatch(
-            (x, 0.12), w, 0.76, transform=ax.transAxes,
-            boxstyle="round,pad=0,rounding_size=0.006",
-            facecolor="#0e0e16", edgecolor=COLORS["line"], lw=1))
-        ax.add_patch(Rectangle((x, 0.12), 0.006, 0.76,
-                               transform=ax.transAxes,
-                               facecolor=color, edgecolor="none"))
-        ax.text(x + 0.018, 0.74, item["label"].upper(),
+    n_ch = len(coverage)
+    item_rows = _coverage_row_groups(coverage)
+    nrows = len(item_rows)
+
+    y_grid_top = 0.815
+    ax.plot([0.032, 0.032], [0.805, 0.985], color=COLORS["cyan"], lw=1.35,
+            transform=ax.transAxes, solid_capstyle="butt", zorder=6)
+    ax.text(0.048, 0.965, "Telemetry channels", transform=ax.transAxes,
+            ha="left", va="top", color=COLORS["text"],
+            fontsize=12.5, fontweight="bold", zorder=6)
+    ax.text(0.048, 0.888, f"{n_ch} channels  ·  session export",
+            transform=ax.transAxes, ha="left", va="top",
+            color=COLORS["cyan"], fontsize=9.1, fontweight="bold",
+            zorder=6)
+    ax.plot([0.044, 0.97], [y_grid_top, y_grid_top], color=COLORS["purple"],
+            lw=0.65, transform=ax.transAxes, clip_on=True, zorder=5)
+
+    x0 = 0.052
+    gap = 0.01
+    right_pad = 0.03
+    bottom_margin = 0.038
+    usable_h = y_grid_top - bottom_margin
+    gap_between = 0.036
+
+    if nrows == 1:
+        h = min(0.78, max(0.22, usable_h - 0.008))
+        row_yhs = [(bottom_margin, h)]
+    elif nrows == 2:
+        h = max(0.20, (usable_h - gap_between) / 2)
+        row_yhs = [
+            (bottom_margin + h + gap_between, h),
+            (bottom_margin, h),
+        ]
+    else:
+        h = max(0.17, (usable_h - 2 * gap_between) / 3)
+        row_yhs = [
+            (bottom_margin + 2 * (h + gap_between), h),
+            (bottom_margin + h + gap_between, h),
+            (bottom_margin, h),
+        ]
+
+    for row_idx, items in enumerate(item_rows):
+        if row_idx >= len(row_yhs):
+            break
+        y0, h = row_yhs[row_idx]
+        if y0 + h > y_grid_top + 1e-4:
+            h = max(0.12, y_grid_top - y0)
+        nc = len(items)
+        if nc == 0:
+            continue
+        avail = 1.0 - x0 - right_pad - gap * max(0, nc - 1)
+        w = max(0.058, avail / nc)
+        w = min(w, 0.228)
+        fs_count = min(17, max(9, int(165 / max(nc, 1))))
+        fs_label = min(8.6, max(7.0, int(50 / max(nc, 1))))
+
+        for i, item in enumerate(items):
+            x = x0 + i * (w + gap)
+            w_cell = w
+            if x + w_cell > 1.0 - right_pad:
+                w_cell = max(0.048, 1.0 - right_pad - x)
+            count = item["count"]
+            color = item["color"]
+            ok = count >= 100
+            half = count >= 50
+            badge_fill = (COLORS["green"] if ok
+                          else (COLORS["gold"] if half else COLORS["red"]))
+            badge_text = "PASS" if ok else f"{count}/100"
+
+            pad = min(0.009, max(0.0035, w_cell * 0.048))
+            cx = x + pad
+            cy0 = y0 + pad * 0.55
+            cw = max(w_cell - 2 * pad, w_cell * 0.84)
+            ch = max(h - pad * 1.25, h * 0.92)
+            accent_w = max(0.012, min(0.034, cw * 0.11))
+
+            ax.add_patch(FancyBboxPatch(
+                (cx, cy0), cw, ch, transform=ax.transAxes,
+                boxstyle="round,pad=0,rounding_size=0.013",
+                facecolor="#0d0f1c", edgecolor=COLORS["line_2"],
+                lw=0.55, zorder=2))
+            ax.add_patch(Rectangle(
+                (cx, cy0), accent_w, ch,
+                transform=ax.transAxes,
+                facecolor=color, edgecolor="none", alpha=0.96, zorder=3))
+            ax.plot([cx + accent_w, cx + accent_w], [cy0, cy0 + ch],
+                    color=color, lw=1.1, alpha=0.9, transform=ax.transAxes,
+                    zorder=4)
+
+            pad_in = max(0.005, cw * 0.035)
+            ix = cx + accent_w + pad_in
+            iw = cw - accent_w - pad_in * 1.4
+
+            ax.text(
+                ix, cy0 + ch * 0.895,
+                item["label"].upper(),
                 transform=ax.transAxes, ha="left", va="center",
-                color=COLORS["muted"], fontsize=8, fontweight="bold")
-        ax.text(x + 0.018, 0.47, f"{count:,}", transform=ax.transAxes,
-                ha="left", va="center", color=color,
-                fontsize=22, fontweight="bold", style="italic")
-        ax.add_patch(FancyBboxPatch(
-            (x + 0.018, 0.18), 0.085, 0.14, transform=ax.transAxes,
-            boxstyle="round,pad=0,rounding_size=0.004",
-            facecolor=badge_color, edgecolor="none"))
-        ax.text(x + 0.060, 0.25, badge_text, transform=ax.transAxes,
-                ha="center", va="center", color="#001",
-                fontsize=8, fontweight="bold", style="italic")
+                color=color, fontsize=fs_label,
+                fontweight="bold", zorder=5)
+
+            body_lo = cy0 + ch * 0.12
+            body_hi = cy0 + ch * 0.78
+            body_h = max(1e-6, body_hi - body_lo)
+            bh = min(0.072, max(0.042, body_h * 0.2))
+            by = cy0 + ch * 0.1
+            gap_nb = body_h * 0.1
+            y_badge_top = by + bh
+            y_hi_num = body_hi - gap_nb
+            y_lo_num = y_badge_top + gap_nb
+            if y_hi_num > y_lo_num:
+                mid_y = 0.5 * (y_lo_num + y_hi_num)
+            else:
+                mid_y = body_lo + body_h * 0.5
+
+            ax.text(ix + iw * 0.5, mid_y, f"{count:,}",
+                    transform=ax.transAxes, ha="center", va="center",
+                    color=COLORS["text"], fontsize=fs_count,
+                    fontweight="bold", zorder=5)
+
+            badge_w = min(0.092, max(0.05, iw * 0.72))
+            bx = ix + (iw - badge_w) / 2
+            ax.add_patch(FancyBboxPatch(
+                (bx, by), badge_w, bh, transform=ax.transAxes,
+                boxstyle="round,pad=0,rounding_size=0.01",
+                facecolor=badge_fill, edgecolor=COLORS["text"],
+                lw=0.55, alpha=1.0, zorder=4))
+            btcol = "#052018" if ok else "#1f0808"
+            ax.text(bx + badge_w / 2, by + bh / 2, badge_text,
+                    transform=ax.transAxes, ha="center", va="center",
+                    color=btcol, fontsize=8.0, fontweight="bold", zorder=5)
 
 def _draw_kpi_row(fig, rect, race):
     x, y, w_total, h_total = rect
@@ -534,61 +798,62 @@ def _draw_kpi_row(fig, rect, race):
     delta = (s["best_lap"] - lap_avg) if lap_avg > 0 else 0
     kpis = [
         ("RACE TIME",   f"{s['total_time']:.2f}", "s",
-         f"{race['lap_count']} LAPS COMPLETED", COLORS["red"]),
+         f"{race['lap_count']} laps", COLORS["red"]),
         ("FASTEST LAP", f"{s['best_lap']:.2f}", "s",
-         (f"{delta:+.2f}s vs AVG" if lap_avg > 0 else "PERSONAL BEST"),
-         COLORS["purple"]),
+         (f"{delta:+.2f} s vs avg lap" if lap_avg > 0 else "personal best"),
+         COLORS["text_2"]),
         ("AVG SPEED",   f"{race['speed_stats']['mean']:.1f}", "px/s",
-         f"{race['speed_stats']['samples']:,} SAMPLES",
+         f"{race['speed_stats']['samples']:,} samples",
          COLORS["cyan"]),
         ("TOP SPEED",   f"{s['max_speed_px_s']:.1f}", "px/s",
-         "PEAK VELOCITY", COLORS["gold"]),
+         "peak", COLORS["gold"]),
         ("INCIDENTS",   f"{s['collisions']}", "",
-         "CLEAN RACE" if s["collisions"] == 0 else "CONTACTS LOGGED",
+         "clean session" if s["collisions"] == 0 else "contacts",
          COLORS["text"]),
-        ("DRS / BOOST", f"{s['nitro_duration']:.1f}", "s",
-         "TOTAL BOOST TIME", COLORS["green"]),
+        ("BOOST", f"{s['nitro_duration']:.1f}", "s",
+         "nitro time", COLORS["green"]),
+        ("CORNERING", f"{race.get('cornering_events', 0)}", "",
+         "fast steer events", COLORS["pink"]),
     ]
-    gap_fig = 0.008
+    gap_fig = 0.007
     w_fig = (w_total - gap_fig * (len(kpis) - 1)) / len(kpis)
     for i, (label, val, unit, sub, c) in enumerate(kpis):
         rx = x + i * (w_fig + gap_fig)
         ax = fig.add_axes([rx, y, w_fig, h_total])
         _hide_axes(ax); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
-        ax.add_patch(FancyBboxPatch(
-            (0.004, 0.04), 0.992, 0.92, transform=ax.transAxes,
-            boxstyle="round,pad=0,rounding_size=0.02",
-            facecolor=COLORS["panel_2"], edgecolor=COLORS["line"], lw=1))
-        ax.add_patch(Rectangle((0.004, 0.04), 0.020, 0.92,
-                               transform=ax.transAxes,
-                               facecolor=c, edgecolor="none"))
-        ax.add_patch(Rectangle((0.024, 0.04), 0.972, 0.030,
-                               transform=ax.transAxes,
-                               facecolor=c, edgecolor="none", alpha=0.30))
+        ax.add_patch(Rectangle(
+            (0, 0), 1, 1, transform=ax.transAxes,
+            facecolor=COLORS["panel_2"], edgecolor=COLORS["line"], lw=0.38,
+            zorder=0))
+        _axes_depth_gradient(ax, zorder=1)
+        ax.plot([0.055, 0.945], [0.879, 0.879], color="#000000",
+                lw=3.2, alpha=0.55, transform=ax.transAxes, clip_on=False,
+                solid_capstyle="butt", zorder=2)
+        ax.plot([0.055, 0.945], [0.882, 0.882], color=c, lw=2.35,
+                transform=ax.transAxes, clip_on=False,
+                solid_capstyle="butt", zorder=3)
 
-        ax.add_patch(patches.Circle(
-            (0.075, 0.80), 0.020, transform=ax.transAxes,
-            facecolor=c, edgecolor="none"))
-        ax.text(0.11, 0.80, label, transform=ax.transAxes,
-                ha="left", va="center", color=COLORS["muted"],
-                fontsize=9, fontweight="bold")
+        ax.text(0.08, 0.78, label, transform=ax.transAxes,
+                ha="left", va="center", color=c,
+                fontsize=8.8, fontweight="bold", zorder=4)
 
-        ax.text(0.06, 0.48, val, transform=ax.transAxes,
+        ax.text(0.08, 0.47, val, transform=ax.transAxes,
                 ha="left", va="center", color=COLORS["text"],
-                fontsize=26, fontweight="bold", style="italic")
+                fontsize=26, fontweight="bold", zorder=4)
         if unit:
-            ax.text(0.94, 0.48, unit, transform=ax.transAxes,
-                    ha="right", va="center", color=COLORS["muted"],
-                    fontsize=10, family="monospace", fontweight="bold")
+            ax.text(0.92, 0.47, unit, transform=ax.transAxes,
+                    ha="right", va="center", color=c,
+                    fontsize=10, fontweight="bold", zorder=4)
 
-        ax.text(0.06, 0.16, sub, transform=ax.transAxes,
-                ha="left", va="center", color=COLORS["dim"],
-                fontsize=8, family="monospace", fontweight="bold")
+        ax.text(0.08, 0.14, sub, transform=ax.transAxes,
+                ha="left", va="center", color=COLORS["muted"],
+                fontsize=7.8, fontweight="bold", zorder=4)
 
 def _draw_stats_tables(fig, rect, race):
     x, y, w_total, h_total = rect
-    gap_fig = 0.012
-    w_fig = (w_total - gap_fig * 2) / 3
+    gap_fig = 0.010
+    n_cards = 4
+    w_fig = (w_total - gap_fig * (n_cards - 1)) / n_cards
     cards = [
         ("SPEED TRAP", COLORS["red"], "Speed Statistics",
          "units in pixels per second",
@@ -614,33 +879,37 @@ def _draw_stats_tables(fig, rect, race):
           ("Median", f"{race['lap_stats']['median']:.2f}  s"),
           ("Standard Deviation",
            f"{race['lap_stats']['std']:.2f}  s")]),
+        ("SECTORS", COLORS["green"], "Split Beacons",
+         "mean seconds to reach each checkpoint ring",
+         race.get("sector_table_rows", [
+             ("S1 mean", "--"), ("S2 mean", "--"), ("S3 mean", "--"),
+             ("Beacons", "0")])),
     ]
     for i, (tag, color, title, sub, rows) in enumerate(cards):
         rx = x + i * (w_fig + gap_fig)
         ax = fig.add_axes([rx, y, w_fig, h_total])
         _hide_axes(ax); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
-        ax.add_patch(Rectangle((0, 0), 1, 1, transform=ax.transAxes,
-                               facecolor=COLORS["panel"],
-                               edgecolor=COLORS["line"], lw=1))
-        ax.add_patch(Rectangle((0, 0), 0.008, 1,
-                               transform=ax.transAxes,
-                               facecolor=color, edgecolor="none"))
+        ax.add_patch(FancyBboxPatch(
+            (0.004, 0.004), 0.992, 0.992, transform=ax.transAxes,
+            boxstyle="round,pad=0,rounding_size=0.018",
+            facecolor=COLORS["panel"], edgecolor=COLORS["line"],
+            lw=0.4, zorder=0))
+        _axes_depth_gradient(ax, zorder=1)
+        ax.plot([0.042, 0.958], [0.946, 0.946], color=color, lw=2.15,
+                transform=ax.transAxes, clip_on=False,
+                solid_capstyle="butt", zorder=2)
 
-        ax.add_patch(Rectangle((0.035, 0.88), 0.24, 0.075,
-                               transform=ax.transAxes,
-                               facecolor=color, edgecolor="none"))
-        ax.text(0.155, 0.918, tag, transform=ax.transAxes,
-                ha="center", va="center", color="#001",
-                fontsize=8, fontweight="bold", style="italic")
-
-        ax.text(0.035, 0.80, title.upper(), transform=ax.transAxes,
+        ax.text(0.04, 0.88, tag, transform=ax.transAxes,
+                ha="left", va="center", color=color,
+                fontsize=8.4, fontweight="bold", zorder=3)
+        ax.text(0.04, 0.805, title, transform=ax.transAxes,
                 ha="left", va="center", color=COLORS["text"],
-                fontsize=11.5, fontweight="bold")
-        ax.text(0.035, 0.735, sub.upper(), transform=ax.transAxes,
+                fontsize=11.8, fontweight="bold", zorder=3)
+        ax.text(0.04, 0.728, sub.title(), transform=ax.transAxes,
                 ha="left", va="center", color=COLORS["muted"],
-                fontsize=8, family="monospace", fontweight="bold")
-        ax.plot([0.035, 0.965], [0.69, 0.69], color=COLORS["red"], lw=1.2,
-                transform=ax.transAxes)
+                fontsize=8.1, fontweight="bold", zorder=3)
+        ax.plot([0.04, 0.96], [0.688, 0.688], color=COLORS["line"],
+                lw=0.38, transform=ax.transAxes, zorder=2)
 
         y_top = 0.61
         y_bot = 0.08
@@ -648,46 +917,56 @@ def _draw_stats_tables(fig, rect, race):
         for j, (k, v) in enumerate(rows):
             yi = y_top - dy * (j + 0.5)
             ax.text(0.045, yi, k, transform=ax.transAxes, ha="left",
-                    va="center", color=COLORS["text_2"], fontsize=10)
+                    va="center", color=COLORS["text_2"], fontsize=10,
+                    fontweight="bold", zorder=3)
             ax.text(0.955, yi, v, transform=ax.transAxes, ha="right",
                     va="center", color=COLORS["text"], fontsize=10,
-                    family="monospace", fontweight="bold")
+                    fontweight="bold", family="monospace", zorder=3)
             if j < len(rows) - 1:
                 ax.plot([0.045, 0.955],
                         [yi - dy * 0.5, yi - dy * 0.5],
-                        color=COLORS["line"], lw=0.5,
-                        transform=ax.transAxes)
+                        color=COLORS["line_dim"], lw=0.38,
+                        transform=ax.transAxes, zorder=2)
 
 def _style_chart_ax(ax, xlabel, ylabel):
-    ax.set_facecolor(COLORS["panel_2"])
+    ax.set_facecolor(COLORS["chart_face"])
     for spine in ax.spines.values():
-        spine.set_edgecolor(COLORS["line"])
-        spine.set_linewidth(1.0)
-    ax.tick_params(colors=COLORS["muted"], which="both",
-                   labelsize=8.5, length=0, pad=4)
-    ax.grid(True, color=COLORS["line"], lw=0.5, alpha=0.6)
+        spine.set_edgecolor(COLORS["line_2"])
+        spine.set_linewidth(0.55)
+    ax.tick_params(colors=COLORS["text_2"], which="both",
+                   labelsize=9.5, length=0, pad=5)
+    ax.grid(True, color=COLORS["grid"], lw=0.52, alpha=0.42,
+            linestyle="-")
     ax.set_axisbelow(True)
-    ax.set_xlabel(xlabel.upper(), color=COLORS["muted"], fontsize=8.5,
-                  fontweight="bold", labelpad=6)
-    ax.set_ylabel(ylabel.upper(), color=COLORS["muted"], fontsize=8.5,
-                  fontweight="bold", labelpad=6)
+    ax.set_xlabel(xlabel.upper(), color=COLORS["muted"], fontsize=9.5,
+                  fontweight="bold", labelpad=8)
+    ax.set_ylabel(ylabel.upper(), color=COLORS["muted"], fontsize=9.5,
+                  fontweight="bold", labelpad=8)
 
 def _draw_chart_card(fig, rect, tag, color, title, sub):
     """Draw a chart card frame and return the inner (chart axes, inner rect)."""
     x, y, w, h = rect
-    ax = _panel_axes(fig, rect, facecolor=COLORS["panel"], accent=color)
-    ax.add_patch(Rectangle((0.020, 0.900), 0.13, 0.060,
-                           transform=ax.transAxes,
-                           facecolor=color, edgecolor="none"))
-    ax.text(0.085, 0.930, tag, transform=ax.transAxes,
-            ha="center", va="center", color="#001",
-            fontsize=8, fontweight="bold", style="italic")
-    ax.text(0.020, 0.840, title.upper(), transform=ax.transAxes,
+    ax = fig.add_axes(rect)
+    _hide_axes(ax); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    ax.set_facecolor(COLORS["panel"])
+    ax.add_patch(FancyBboxPatch(
+        (0.004, 0.004), 0.992, 0.992, transform=ax.transAxes,
+        boxstyle="round,pad=0,rounding_size=0.016",
+        facecolor=COLORS["panel"], edgecolor=COLORS["line"],
+        lw=0.4, zorder=0))
+    _axes_depth_gradient(ax, zorder=1)
+    ax.plot([0.025, 0.975], [0.948, 0.948], color=color, lw=2.0,
+            transform=ax.transAxes, clip_on=False, solid_capstyle="butt",
+            zorder=3)
+    ax.text(0.04, 0.878, tag, transform=ax.transAxes,
+            ha="left", va="center", color=color,
+            fontsize=8.2, fontweight="bold", zorder=4)
+    ax.text(0.04, 0.812, title, transform=ax.transAxes,
             ha="left", va="center", color=COLORS["text"],
-            fontsize=11, fontweight="bold")
-    ax.text(0.020, 0.790, sub.upper(), transform=ax.transAxes,
+            fontsize=11.4, fontweight="bold", zorder=4)
+    ax.text(0.04, 0.758, sub.title(), transform=ax.transAxes,
             ha="left", va="center", color=COLORS["muted"],
-            fontsize=8, family="monospace", fontweight="bold")
+            fontsize=8.1, fontweight="bold", zorder=4)
 
     inner_x = x + w * 0.07
     inner_y = y + h * 0.15
@@ -714,8 +993,8 @@ def _draw_charts_row(fig, row_rect, race, row_index: int):
         t, s = race["speed_t"], race["speed_s"]
         if len(t) > 0:
             c1.fill_between(t, s, s.min() if len(s) else 0,
-                            color=COLORS["red"], alpha=0.22, linewidth=0)
-            c1.plot(t, s, color=COLORS["red"], lw=1.4)
+                            color=COLORS["red"], alpha=0.38, linewidth=0)
+            c1.plot(t, s, color=COLORS["red_soft"], lw=1.9)
             c1.set_xlim(float(t.min()), float(t.max()))
 
         c2 = _draw_chart_card(fig, right_rect,
@@ -725,8 +1004,13 @@ def _draw_charts_row(fig, row_rect, race, row_index: int):
         _style_chart_ax(c2, "speed range (px/s)", "frequency")
         samples = race["speed_samples"]
         if len(samples) > 0:
-            c2.hist(samples, bins=18, color=COLORS["purple"],
-                    edgecolor=COLORS["panel_2"], linewidth=0.8)
+            n_hist, _bins, patches = c2.hist(
+                samples, bins=18, edgecolor=COLORS["chart_face"],
+                linewidth=0.55, alpha=0.98)
+            cm = _hist_purple_cmap()
+            n_pat = len(patches)
+            for hi, p in enumerate(patches):
+                p.set_facecolor(cm(hi / max(n_pat - 1, 1)))
     else:
 
         c3 = _draw_chart_card(fig, left_rect,
@@ -740,23 +1024,31 @@ def _draw_charts_row(fig, row_rect, race, row_index: int):
             others = scat[scat["race"] != cur]
             mine = scat[scat["race"] == cur]
             if not others.empty:
-                c3.scatter(others["x"], others["y"], s=22,
-                           color=COLORS["green"], alpha=0.70,
-                           edgecolors="none",
+                c3.scatter(others["x"], others["y"], s=28,
+                           color=COLORS["green"], alpha=0.88,
+                           edgecolors=COLORS["cyan"], linewidths=0.45,
                            label=f"other races ({len(others)})")
             if not mine.empty:
-                c3.scatter(mine["x"], mine["y"], s=60,
+                c3.scatter(mine["x"], mine["y"], s=72,
                            color=COLORS["red"],
-                           edgecolors="#fff", linewidths=1.2,
+                           edgecolors=COLORS["text"], linewidths=1.15,
                            label=f"this race ({len(mine)})", zorder=5)
-            c3.legend(loc="upper right", fontsize=8, frameon=False,
-                      labelcolor=COLORS["text_2"])
+            leg = c3.legend(
+                loc="upper right", fontsize=8.5, frameon=True, borderpad=0.5,
+                fancybox=True, framealpha=0.94,
+                facecolor=COLORS["panel"], edgecolor=COLORS["line_2"])
+            if leg is not None:
+                for t in leg.get_texts():
+                    t.set_color(COLORS["text_2"])
 
         x4, y4, w4, h4 = right_rect
         _panel_axes(fig, right_rect, facecolor=COLORS["panel"],
                     accent=COLORS["gold"])
 
         frame = fig.axes[-1]
+        _axes_depth_gradient(frame, zorder=0.45)
+        frame.plot([0.02, 0.98], [0.948, 0.948], color=COLORS["gold"], lw=1.85,
+                   transform=frame.transAxes, clip_on=False, zorder=4)
         frame.add_patch(Rectangle((0.020, 0.900), 0.13, 0.060,
                                   transform=frame.transAxes,
                                   facecolor=COLORS["gold"], edgecolor="none"))
@@ -777,7 +1069,7 @@ def _draw_charts_row(fig, row_rect, race, row_index: int):
         inner_h = h4 * 0.60
         c4 = fig.add_axes([inner_x, inner_y, inner_w, inner_h])
         _hide_axes(c4)
-        c4.set_facecolor(COLORS["panel"])
+        c4.set_facecolor(COLORS["chart_face"])
         left = race["steering"]["left"]
         right = race["steering"]["right"]
         if left + right > 0:
@@ -802,8 +1094,48 @@ def _draw_charts_row(fig, row_rect, race, row_index: int):
                     color=COLORS["muted"], fontsize=8, fontweight="bold",
                     family="monospace")
 
+def _draw_charts_row3(fig, row_rect, race):
+    x, y, w, h = row_rect
+    gap_fig = 0.012
+    col_w = (w - gap_fig) / 2
+    left_rect = (x, y, col_w, h)
+    right_rect = (x + col_w + gap_fig, y, col_w, h)
+    c1 = _draw_chart_card(fig, left_rect,
+                          "TRAJECTORY", COLORS["cyan"],
+                          "Car XY path",
+                          "colour = speed (px/s)")
+    _style_chart_ax(c1, "x (px)", "y (px)")
+    px, py, pc = race["pos_x"], race["pos_y"], race["pos_c"]
+    if len(px) > 1:
+        vmin, vmax = float(np.min(pc)), float(np.max(pc))
+        if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
+            vmax = vmin + 1e-6
+        sc = c1.scatter(
+            px, py, c=pc, s=22, cmap=_track_speed_cmap(),
+            vmin=vmin, vmax=vmax,
+            alpha=0.94, edgecolors="none")
+        cb = fig.colorbar(sc, ax=c1, fraction=0.046, pad=0.02)
+        cb.ax.tick_params(colors=COLORS["text_2"], labelsize=7.5, length=2,
+                          width=0.6)
+        cb.ax.yaxis.label.set(color=COLORS["muted"])
+        cb.outline.set_edgecolor(COLORS["line_2"])
+        cb.outline.set_linewidth(0.55)
+
+    c2 = _draw_chart_card(fig, right_rect,
+                          "GAP", COLORS["orange"],
+                          "Distance to leader",
+                          "path progress units (higher = behind)")
+    _style_chart_ax(c2, "time (s)", "gap")
+    gt, gg = race["gap_t"], race["gap_g"]
+    if len(gt) > 0:
+        c2.plot(gt, gg, color=COLORS["orange"], lw=1.95)
+        c2.axhline(0, color=COLORS["muted"], lw=0.9, ls="--", alpha=0.8)
+        c2.set_xlim(float(gt.min()), float(gt.max()))
+
+
 def _draw_standings(fig, rect, race):
     ax = _panel_axes(fig, rect, facecolor=COLORS["panel"])
+    _axes_depth_gradient(ax, zorder=0.45)
     competitors = race["competitors"]
     if not competitors:
         ax.text(0.5, 0.5, "no classification data",
@@ -818,8 +1150,8 @@ def _draw_standings(fig, rect, race):
         ax.text(hx, 0.90, h, transform=ax.transAxes,
                 ha=a, va="center", color=COLORS["muted"],
                 fontsize=8.5, fontweight="bold")
-    ax.plot([0.02, 0.98], [0.85, 0.85], color=COLORS["red"], lw=1.2,
-            transform=ax.transAxes)
+    ax.plot([0.02, 0.98], [0.852, 0.852], color=COLORS["line"],
+            lw=0.45, transform=ax.transAxes)
 
     winner_time = next((c["finish_time"] for c in competitors
                         if c.get("rank") == 1
@@ -864,8 +1196,8 @@ def _draw_standings(fig, rect, race):
             lw=1 if rank > 3 else 0))
         ax.text(col_xs[0] + 0.012, y_c, str(rank),
                 transform=ax.transAxes, ha="center", va="center",
-                color=pill_text_color, fontsize=11, fontweight="bold",
-                style="italic")
+                color=pill_text_color, fontsize=10.5, fontweight="normal",
+                )
 
         dc = _driver_color(name)
         ax.add_patch(patches.Circle(
@@ -876,16 +1208,16 @@ def _draw_standings(fig, rect, race):
         name_color = COLORS["gold"] if rank == 1 else COLORS["text"]
         ax.text(col_xs[2], y_c, name.upper(),
                 transform=ax.transAxes, ha="left", va="center",
-                color=name_color, fontsize=10.5, fontweight="bold")
+                color=name_color, fontsize=10.4, fontweight="bold")
 
         bl_txt = f"{bl:.2f}s" if bl is not None else "--"
         ft_txt = f"{ft:.2f}s" if ft is not None else "DNF"
         ax.text(col_xs[3], y_c, bl_txt, transform=ax.transAxes,
                 ha="right", va="center", color=COLORS["text"],
-                fontsize=10, family="monospace", fontweight="bold")
+                fontsize=9.9, family="monospace", fontweight="bold")
         ax.text(col_xs[4], y_c, ft_txt, transform=ax.transAxes,
                 ha="right", va="center", color=COLORS["text"],
-                fontsize=10, family="monospace", fontweight="bold")
+                fontsize=9.9, family="monospace", fontweight="bold")
 
         if rank == 1:
             ax.add_patch(Rectangle(
@@ -893,25 +1225,24 @@ def _draw_standings(fig, rect, race):
                 0.060, row_h * 0.44,
                 transform=ax.transAxes,
                 facecolor=COLORS["red"], edgecolor="none"))
-            ax.text(col_xs[5] - 0.030, y_c, "LEADER",
+            ax.text(col_xs[5] - 0.030, y_c, "Leader",
                     transform=ax.transAxes, ha="center", va="center",
-                    color="#fff", fontsize=8, fontweight="bold",
-                    style="italic")
+                    color="#fff", fontsize=7.8, fontweight="normal")
         elif ft is not None and winner_time is not None:
             gap = ft - winner_time
             ax.text(col_xs[5], y_c, f"+{gap:.3f}",
                     transform=ax.transAxes, ha="right", va="center",
                     color=COLORS["text_2"], fontsize=10,
-                    family="monospace")
+                    family="monospace", fontweight="bold")
         else:
             ax.text(col_xs[5], y_c, "--",
                     transform=ax.transAxes, ha="right", va="center",
                     color=COLORS["dim"], fontsize=10,
-                    family="monospace")
+                    family="monospace", fontweight="bold")
 
         ax.text(col_xs[6], y_c, str(laps),
                 transform=ax.transAxes, ha="right", va="center",
-                color=COLORS["text"], fontsize=10,
+                color=COLORS["text"], fontsize=9.9,
                 family="monospace", fontweight="bold")
 
 def _draw_footer(fig, rect):
@@ -919,22 +1250,15 @@ def _draw_footer(fig, rect):
     ax = fig.add_axes(rect)
     _hide_axes(ax); ax.set_xlim(0, 1); ax.set_ylim(0, 1)
     ax.set_facecolor(COLORS["bg"])
-    ax.plot([0, 1], [0.95, 0.95], color=COLORS["line"], lw=1,
+    ax.plot([0, 1], [0.95, 0.95], color=COLORS["line"], lw=0.42,
             transform=ax.transAxes)
-    ax.text(0.02, 0.45, "F1 / 67   TELEMETRY REPORT",
+    ax.text(0.02, 0.48, "Formula 67  ·  telemetry export",
             transform=ax.transAxes, ha="left", va="center",
-            color=COLORS["red"], fontsize=9, fontweight="bold",
-            style="italic")
-    ax.text(0.50, 0.45,
-            "generated from stats/*.csv via pandas",
-            transform=ax.transAxes, ha="center", va="center",
-            color=COLORS["dim"], fontsize=8, family="monospace",
-            fontweight="bold")
-    ax.text(0.98, 0.45,
-            "VELOCITY · PX/S   |   TIMING · SECONDS",
+            color=COLORS["muted"], fontsize=8.6, fontweight="bold")
+    ax.text(0.98, 0.48,
+            "Units · speed px/s · time s",
             transform=ax.transAxes, ha="right", va="center",
-            color=COLORS["dim"], fontsize=8, family="monospace",
-            fontweight="bold")
+            color=COLORS["dim"], fontsize=8.2, fontweight="bold")
 
 
 # ---------------------------------------------------------------------------
@@ -944,18 +1268,19 @@ def _render_dashboard(payload, race, coverage):
     """Build the full matplotlib figure and return (fig, total_height)."""
     rects, total_in = _compute_layout()
 
+    plt.rcParams.update(_typography_rc_params())
     plt.rcParams.update({
-        "font.family": ["DejaVu Sans"],
         "axes.edgecolor": COLORS["line"],
+        "axes.linewidth": 0.55,
         "axes.labelcolor": COLORS["muted"],
         "xtick.color": COLORS["muted"],
         "ytick.color": COLORS["muted"],
     })
 
-    fig = plt.figure(figsize=(FIG_WIDTH, total_in), dpi=100)
+    fig = plt.figure(figsize=(FIG_WIDTH, total_in))
     fig.patch.set_facecolor(COLORS["bg"])
 
-    margin_x = 0.015
+    margin_x = 0.02
 
     def R(key):
         y_b, h = rects[key]
@@ -972,6 +1297,7 @@ def _render_dashboard(payload, race, coverage):
                     "Telemetry", "// channel data")
     _draw_charts_row(fig, R("charts_r1"), race, 0)
     _draw_charts_row(fig, R("charts_r2"), race, 1)
+    _draw_charts_row3(fig, R("charts_r3"), race)
     _section_header(fig, R("sec3_head"), "03",
                     "Race Classification", "// final result")
     _draw_standings(fig, R("standings"), race)
@@ -980,13 +1306,10 @@ def _render_dashboard(payload, race, coverage):
 
 
 # ---------------------------------------------------------------------------
-# Pygame viewer - used instead of Tk/MacOSX because Tcl/Tk 8.6 shipped with
-# the stock Python.org / pyenv build crashes on macOS 14+ with:
-#   "-[NSApplication macOSVersion]: unrecognized selector"
-# pygame is already a project dependency, so re-using it keeps things simple.
+# Pygame-based PNG viewer (Tk from python.org/pyenv broke on newer macOS)
 # ---------------------------------------------------------------------------
 class EmbeddedTelemetryViewer:
-    """Scrollable telemetry PNG drawn into the existing game window."""
+    """Pan/zoom the big telemetry PNG inside the game window."""
 
     TOP_BAR = 44
 
@@ -1014,7 +1337,7 @@ class EmbeddedTelemetryViewer:
         self.prev_rect = pygame.Rect(0, 0, 0, 0)
         self.next_rect = pygame.Rect(0, 0, 0, 0)
         self.back_rect = pygame.Rect(0, 0, 0, 0)
-        self.bg = (7, 7, 10)
+        self.bg = (9, 9, 14)
         self._reload_image()
 
     def _reload_image(self):
@@ -1024,7 +1347,8 @@ class EmbeddedTelemetryViewer:
     def _font(self, size: int, bold: bool = True, mono: bool = False):
         try:
             fams = ("Menlo,Consolas,Courier New,monospace" if mono
-                    else "Helvetica Neue,Arial,Helvetica,sans-serif")
+                    else "Inter,Plus Jakarta Sans,Segoe UI,Helvetica Neue,"
+                         "Arial,Helvetica,sans-serif")
             return self._pg.font.SysFont(fams, size, bold=bold)
         except Exception:
             return self._pg.font.Font(None, size + 2)
@@ -1057,7 +1381,7 @@ class EmbeddedTelemetryViewer:
             self.scroll_y = 0
 
     def handle_event(self, event) -> Optional[str]:
-        """Return ``\"pop\"`` to leave the viewer (back to menu / results)."""
+        """Return "pop" when the user backs out to the menu/results."""
         pygame = self._pg
         if event.type == pygame.QUIT:
             return None
@@ -1124,8 +1448,8 @@ class EmbeddedTelemetryViewer:
         pygame = self._pg
         TOP_BAR = self.TOP_BAR
         bar = pygame.Surface((win_w, TOP_BAR), pygame.SRCALPHA)
-        bar.fill((12, 12, 20, 245))
-        pygame.draw.rect(bar, (225, 6, 0), (0, TOP_BAR - 2, win_w, 2))
+        bar.fill((15, 15, 22, 250))
+        pygame.draw.rect(bar, (225, 6, 0), (0, TOP_BAR - 1, win_w, 1))
 
         f_label = self._font(9, bold=True)
         f_big = self._font(18, bold=True)
@@ -1137,7 +1461,9 @@ class EmbeddedTelemetryViewer:
         self.back_rect = pygame.Rect(
             8, (TOP_BAR - back_txt.get_height() - 8) // 2,
             back_txt.get_width() + pad_x * 2, back_txt.get_height() + 8)
-        pygame.draw.rect(bar, (180, 40, 20), self.back_rect, border_radius=6)
+        pygame.draw.rect(bar, (30, 30, 40), self.back_rect, border_radius=6)
+        pygame.draw.rect(bar, (70, 70, 82), self.back_rect, width=1,
+                         border_radius=6)
         bar.blit(back_txt,
                  (self.back_rect.centerx - back_txt.get_width() // 2,
                   self.back_rect.centery - back_txt.get_height() // 2))
@@ -1242,7 +1568,7 @@ def _show_in_pygame_window(
         race_ids: Optional[List[int]] = None,
         current_race: Optional[int] = None,
         render_fn: Optional[Callable[[int], Optional[str]]] = None):
-    """Resizable, scrollable dashboard viewer with round switching."""
+    """Standalone pygame window for the PNG + race switching."""
     try:
         import pygame
     except Exception as exc:
@@ -1323,6 +1649,12 @@ def _make_telemetry_render_bundle(
         os.path.join(stats_dir, "collision_event.csv"))
     steering_events = _read_csv_df(
         os.path.join(stats_dir, "steering_event.csv"))
+    position_df = _read_csv_df(os.path.join(stats_dir, "position.csv"))
+    sector_df = _read_csv_df(os.path.join(stats_dir, "sector_split.csv"))
+    gap_df = _read_csv_df(os.path.join(stats_dir, "gap_sample.csv"))
+    input_df = _read_csv_df(os.path.join(stats_dir, "input_sample.csv"))
+    corner_df = _read_csv_df(
+        os.path.join(stats_dir, "cornering_event.csv"))
 
     if race_summaries.empty:
         print("[visualize] no race_summary.csv data found")
@@ -1343,16 +1675,26 @@ def _make_telemetry_render_bundle(
         return None
 
     coverage = [
-        {"label": "Speed Samples",    "count": int(len(speeds)),
+        {"label": "Speed",       "count": int(len(speeds)),
          "color": COLORS["cyan"]},
-        {"label": "Steering Inputs",  "count": int(len(steering_events)),
+        {"label": "Steering",    "count": int(len(steering_events)),
          "color": COLORS["pink"]},
-        {"label": "Lap Times",        "count": int(len(laps)),
+        {"label": "Laps",        "count": int(len(laps)),
          "color": COLORS["gold"]},
-        {"label": "Collision Events", "count": int(len(collision_events)),
+        {"label": "Collisions",  "count": int(len(collision_events)),
          "color": COLORS["red"]},
-        {"label": "Nitro Bursts",     "count": int(len(nitro_events)),
+        {"label": "Nitro",       "count": int(len(nitro_events)),
          "color": COLORS["green"]},
+        {"label": "XY Path",     "count": int(len(position_df)),
+         "color": COLORS["cyan"]},
+        {"label": "Sectors",     "count": int(len(sector_df)),
+         "color": COLORS["green"]},
+        {"label": "Pedals",      "count": int(len(input_df)),
+         "color": COLORS["orange"]},
+        {"label": "Gap trace",   "count": int(len(gap_df)),
+         "color": COLORS["orange"]},
+        {"label": "Cornering",   "count": int(len(corner_df)),
+         "color": COLORS["purple"]},
     ]
 
     os.makedirs(out_dir, exist_ok=True)
@@ -1371,6 +1713,10 @@ def _make_telemetry_render_bundle(
             steering_r=_filter_race(steerings, int(rid)),
             nitro_events_all=nitro_events,
             nitro_aggregates=nitros,
+            sectors_r=_filter_race(sector_df, int(rid)),
+            positions_r=_filter_race(position_df, int(rid)),
+            gaps_r=_filter_race(gap_df, int(rid)),
+            cornering_r=_filter_race(corner_df, int(rid)),
         )
         race_i["total_races"] = len(all_race_ids)
         payload_i = {
@@ -1380,7 +1726,7 @@ def _make_telemetry_render_bundle(
             "race": race_i,
         }
         fig_i, _ = _render_dashboard(payload_i, race_i, coverage)
-        fig_i.savefig(out_path, facecolor=COLORS["bg"], dpi=120,
+        fig_i.savefig(out_path, facecolor=COLORS["bg"],
                       bbox_inches=None, pad_inches=0)
         plt.close(fig_i)
         return out_path
@@ -1394,7 +1740,7 @@ def build_embedded_telemetry_viewer(
         out_dir: str = "reports",
         race_id: Optional[int] = None,
 ) -> Optional[EmbeddedTelemetryViewer]:
-    """Build a dashboard viewer for use inside the main game loop."""
+    """Wire up the in-game report viewer (or None if no PNG yet)."""
     bundle = _make_telemetry_render_bundle(stats_dir, out_dir, race_id)
     if bundle is None:
         return None
@@ -1408,15 +1754,8 @@ def generate_report(stats_dir: str = "stats",
                     race_id: Optional[int] = None,
                     open_browser: bool = False,
                     show_window: bool = False) -> Optional[str]:
-    """Render the telemetry dashboard.
-
-    Parameters
-    ----------
-    show_window : bool
-        If True, opens the dashboard as a scrollable native window.
-    open_browser : bool
-        Legacy alias for ``show_window``.
-    """
+    """Save ``telemetry_report.png``; optionally open it in a pygame window
+    (``show_window`` / legacy ``open_browser``)."""
     bundle = _make_telemetry_render_bundle(stats_dir, out_dir, race_id)
     if bundle is None:
         return None

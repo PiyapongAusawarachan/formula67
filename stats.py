@@ -1,20 +1,52 @@
-"""StatsLogger and Leaderboard - data collection and ranking.
-
-Collects 5 features (>=100 records each) and exports to CSV:
-  1. Speed         - sampled every 0.2 s              -> speed.csv
-  2. Steering      - every left/right key press        -> steering_event.csv
-                     (plus per-race totals             -> steering.csv)
-  3. Lap Time      - one record per completed lap      -> lap_time.csv
-  4. Collision     - one record per individual hit     -> collision_event.csv
-                     (plus per-race totals             -> collision.csv)
-  5. Nitro burst   - one record per activation         -> nitro_event.csv
-                     (plus per-race totals             -> nitro.csv)
-
-Leaderboard maintains the top 10 best lap times using a sorting algorithm.
-"""
+"""CSV telemetry (StatsLogger) and the lap-time leaderboard."""
 import csv
 import os
 import time
+
+# High-volume series: read only max race_id at startup (fast), merge on export.
+_STREAM_FEATURES = frozenset({
+    "speed", "steering_event", "collision_event", "nitro_event",
+    "position", "sector_split", "input_sample", "gap_sample",
+    "cornering_event",
+})
+
+
+def _scan_max_race_id(path):
+    """One pass, low overhead (tuple rows, not dicts per line)."""
+    mx = 0
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            if not header:
+                return 0
+            try:
+                rid_idx = header.index("race_id")
+            except ValueError:
+                return 0
+            for row in reader:
+                if len(row) <= rid_idx:
+                    continue
+                try:
+                    mx = max(mx, int(float(row[rid_idx])))
+                except (TypeError, ValueError):
+                    pass
+    except OSError:
+        return 0
+    return mx
+
+
+def _merge_fieldnames(rows_a, rows_b):
+    order = []
+    seen = set()
+    for block in (rows_a, rows_b):
+        for row in block:
+            for k in row:
+                if k not in seen:
+                    seen.add(k)
+                    order.append(k)
+    return order
+
 
 class StatsLogger:
     SAMPLE_INTERVAL = 0.2
@@ -30,6 +62,11 @@ class StatsLogger:
         "steering_event":   "steering_event.csv",
         "collision_event":  "collision_event.csv",
         "nitro_event":      "nitro_event.csv",
+        "position":         "position.csv",
+        "sector_split":     "sector_split.csv",
+        "input_sample":     "input_sample.csv",
+        "gap_sample":       "gap_sample.csv",
+        "cornering_event":  "cornering_event.csv",
     }
 
     def __init__(self, file_path="stats"):
@@ -47,12 +84,16 @@ class StatsLogger:
         self._load_existing()
 
     def _load_existing(self):
-        """Read every known CSV under ``file_path`` into the buffer."""
+        """Load prior CSV rows from disk into memory."""
         if not os.path.isdir(self.file_path):
             return
         for feature, filename in self._FEATURE_FILES.items():
             path = os.path.join(self.file_path, filename)
             if not os.path.exists(path):
+                continue
+            if feature in _STREAM_FEATURES:
+                self._race_id = max(self._race_id, _scan_max_race_id(path))
+                self.data_buffer.setdefault(feature, [])
                 continue
             try:
                 with open(path, "r", encoding="utf-8") as f:
@@ -70,20 +111,70 @@ class StatsLogger:
                     except (TypeError, ValueError):
                         pass
 
+    @property
+    def race_id(self):
+        return self._race_id
+
     def start_race(self):
         self._race_id += 1
         self._last_sample_time = time.time()
 
-    def sample_speed(self, current_speed):
-        """Sample player speed every SAMPLE_INTERVAL seconds."""
+    def telemetry_bundle(
+            self,
+            current_speed,
+            cx,
+            cy,
+            path_idx,
+            lap_number,
+            throttle,
+            brake,
+            nitro_on,
+            gap_progress,
+    ):
+        """Speed + on-track position + pedals + gap to leader on one clock."""
         now = time.time()
-        if now - self._last_sample_time >= self.SAMPLE_INTERVAL:
-            self._last_sample_time = now
-            self.log_feature("speed", {
-                "race_id": self._race_id,
-                "timestamp": round(now, 3),
-                "speed_px_s": round(current_speed, 3),
-            })
+        if now - self._last_sample_time < self.SAMPLE_INTERVAL:
+            return
+        self._last_sample_time = now
+        rid = self._race_id
+        ts = round(now, 3)
+        self.log_feature("speed", {
+            "race_id": rid, "timestamp": ts,
+            "speed_px_s": round(current_speed, 3),
+        })
+        self.log_feature("position", {
+            "race_id": rid, "timestamp": ts, "lap_number": lap_number,
+            "path_index": path_idx, "x": round(cx, 1), "y": round(cy, 1),
+            "speed_px_s": round(current_speed, 3),
+        })
+        t_val = 1 if throttle else 0
+        b_val = 1 if brake else 0
+        n_val = 1 if nitro_on else 0
+        self.log_feature("input_sample", {
+            "race_id": rid, "timestamp": ts,
+            "throttle": t_val, "brake": b_val, "nitro": n_val,
+        })
+        self.log_feature("gap_sample", {
+            "race_id": rid, "timestamp": ts,
+            "gap_progress": gap_progress,
+        })
+
+    def log_sector_split(self, race_id, lap_number, sector_index, split_s):
+        self.log_feature("sector_split", {
+            "race_id": race_id,
+            "lap_number": lap_number,
+            "sector_index": sector_index,
+            "split_s": split_s,
+        })
+
+    def log_cornering_event(self, lap_number, direction, speed_frame):
+        self.log_feature("cornering_event", {
+            "race_id": self._race_id,
+            "timestamp": round(time.time(), 3),
+            "lap_number": lap_number,
+            "direction": direction,
+            "speed_frame": round(speed_frame, 3),
+        })
 
     def log_feature(self, feature, record):
         if feature not in self.data_buffer:
@@ -98,7 +189,7 @@ class StatsLogger:
         })
 
     def log_collision_event(self, lap_number, source="obstacle"):
-        """Record an individual collision event (hit obstacle or wall)."""
+        """One row per bump (wall or obstacle)."""
         self.log_feature("collision_event", {
             "race_id": self._race_id,
             "timestamp": round(time.time(), 3),
@@ -107,7 +198,7 @@ class StatsLogger:
         })
 
     def log_nitro_event(self, lap_number, duration_s, avg_speed_px_s):
-        """Record one completed nitro burst (activation -> deactivation)."""
+        """Called when a nitro burst ends (duration + average speed)."""
         self.log_feature("nitro_event", {
             "race_id": self._race_id,
             "timestamp": round(time.time(), 3),
@@ -117,7 +208,7 @@ class StatsLogger:
         })
 
     def log_steering_event(self, direction):
-        """Record one steering key press (every left/right input)."""
+        """One row per left/right key press."""
         self.log_feature("steering_event", {
             "race_id": self._race_id,
             "timestamp": round(time.time(), 3),
@@ -154,7 +245,7 @@ class StatsLogger:
             self.log_lap(rid, i, lap_t)
 
     def log_competitor_results(self, racers):
-        """Record the finishing time and best lap of every competitor."""
+        """Store finish time / best lap for each AI name."""
         rid = self._race_id
         for r in racers:
             self.log_feature("competitor", {
@@ -171,7 +262,8 @@ class StatsLogger:
             })
 
     def _average_speed_for_race(self, race_id):
-        samples = [r["speed_px_s"] for r in self.data_buffer["speed"]
+        speed_rows = self.data_buffer.get("speed") or []
+        samples = [r["speed_px_s"] for r in speed_rows
                    if r.get("race_id") == race_id]
         if not samples:
             return 0.0
@@ -182,14 +274,28 @@ class StatsLogger:
         os.makedirs(out_dir, exist_ok=True)
         written = []
         for feature, records in self.data_buffer.items():
-            if not records:
-                continue
             path = os.path.join(out_dir, f"{feature}.csv")
-            fieldnames = list(records[0].keys())
+            if feature in _STREAM_FEATURES:
+                existing = []
+                if os.path.exists(path):
+                    try:
+                        with open(path, newline="", encoding="utf-8") as f:
+                            existing = list(csv.DictReader(f))
+                    except (OSError, csv.Error):
+                        existing = []
+                if not existing and not records:
+                    continue
+                all_rows = existing + records
+                fieldnames = _merge_fieldnames(existing, records)
+            else:
+                if not records:
+                    continue
+                all_rows = records
+                fieldnames = list(records[0].keys())
             with open(path, "w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
-                writer.writerows(records)
+                writer.writerows(all_rows)
             written.append(path)
         return written
 
@@ -197,7 +303,7 @@ class StatsLogger:
         return {k: len(v) for k, v in self.data_buffer.items()}
 
 class Leaderboard:
-    """Top 10 best lap times. Uses insertion sort to keep entries ordered."""
+    """Top 10 laps, read/write ``leaderboard.csv``."""
 
     MAX_ENTRIES = 10
 
@@ -224,7 +330,7 @@ class Leaderboard:
 
     @staticmethod
     def _sort(entries):
-        """Insertion sort by lap_time ascending (lower is better)."""
+        """Keep entries sorted fastest-first (insertion sort; N is tiny)."""
         sorted_list = []
         for entry in entries:
             inserted = False

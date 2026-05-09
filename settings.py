@@ -1,8 +1,23 @@
 """Game tuning: difficulty presets, path geometry, and timing constants."""
 
-TRACK_SCALE = 0.95
+# Slightly larger playfield; PATH / masks scale via _PATH_SCALE.
+TRACK_SCALE = 1.0
+
+# Extra window width so minimap + standings sit on grass, not on the track bitmap.
+HUD_SIDEBAR_WIDTH = 240
 _BASE_SCALE = 0.9
 _PATH_SCALE = TRACK_SCALE / _BASE_SCALE
+
+# See ``assets.PLAYFIELD_RECT`` / margins: offset track in the window so the top-left
+# lap HUD clears the circuit. Minimum PATH x scales with _PATH_SCALE (~62 default).
+_PLAYFIELD_CLEAR_HUD_X = 340
+_PLAYFIELD_MIN_PATH_X = 56  # see _BASE_PATH
+PLAYFIELD_MARGIN_LEFT = max(
+    48,
+    int(_PLAYFIELD_CLEAR_HUD_X - _PLAYFIELD_MIN_PATH_X * _PATH_SCALE) + 8,
+)
+PLAYFIELD_MARGIN_TOP = 56
+PLAYFIELD_MARGIN_BOTTOM = 56
 
 FPS = 60
 # Menu can use a lower cap on very slow machines; 60 is fine after menu caching.
@@ -15,7 +30,7 @@ DIFFICULTIES = {
         "label": "EASY",
         "color": (110, 220, 140),
         "icon": "shield",
-        "ai_speed_mult": 0.78,
+        "ai_speed_mult": 0.59,
         "ai_lookahead_bonus": -6,
         "ai_rotation_mult": 0.88,
         "ai_apex_strength": 0.30,
@@ -29,7 +44,7 @@ DIFFICULTIES = {
         "label": "MEDIUM",
         "color": (255, 215, 100),
         "icon": "bolt",
-        "ai_speed_mult": 0.86,
+        "ai_speed_mult": 0.645,
         "ai_lookahead_bonus": -4,
         "ai_rotation_mult": 0.94,
         "ai_apex_strength": 0.45,
@@ -43,7 +58,7 @@ DIFFICULTIES = {
         "label": "HARD",
         "color": (240, 90, 110),
         "icon": "skull",
-        "ai_speed_mult": 1.0,
+        "ai_speed_mult": 0.81,
         "ai_lookahead_bonus": 14,
         "ai_rotation_mult": 1.55,
         "ai_apex_strength": 1.0,

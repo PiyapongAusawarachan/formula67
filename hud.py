@@ -1,9 +1,16 @@
-"""In-race HUD: lap/time panel, speedometer, minimap, standings."""
+"""HUD widgets (lap chip, minimap, speedo, standings strip)."""
 import math
 
 import pygame
 
-from assets import HUD_FONT, HUD_FONT_SMALL, HEIGHT, WIDTH
+from assets import (
+    HUD_FONT,
+    HUD_FONT_SMALL,
+    HEIGHT,
+    TRACK_VIEW_H,
+    TRACK_VIEW_W,
+    WIDTH,
+)
 from settings import KMH_FACTOR, PATH, SPEEDO_MAX_KMH
 from utils import draw_progress_bar, draw_rounded_panel
 
@@ -85,7 +92,7 @@ def draw_hud(win, player_car, race_manager, standings=None):
 
 
 def _gauge_xy(cx, cy, radius, t):
-    """Map t in [0,1] to a point on a 270-degree arc gauge."""
+    """Point on the semicircle for parameter t in 0..1."""
     angle_from_top_cw = -135 + 270 * t
     rad = math.radians(90 - angle_from_top_cw)
     return (cx + radius * math.cos(rad),
@@ -93,7 +100,7 @@ def _gauge_xy(cx, cy, radius, t):
 
 
 def _build_speedometer_base(size=130, max_kmh=SPEEDO_MAX_KMH):
-    """Pre-render the static speedometer dial (background, ticks, labels)."""
+    """Bake the dial once (ticks, colours)."""
     surf = pygame.Surface((size, size), pygame.SRCALPHA)
     cx = cy = size // 2
     radius = size // 2 - 6
@@ -169,7 +176,7 @@ def _build_speedometer_base(size=130, max_kmh=SPEEDO_MAX_KMH):
 
 
 def draw_speedometer(win, kmh, nitro_active=False):
-    """Draw a circular speedometer at the bottom-center of the screen."""
+    """Bottom-left gauge + digital readout."""
     global _SPEEDO_BASE
     if _SPEEDO_BASE is None:
         _SPEEDO_BASE = _build_speedometer_base()
@@ -213,7 +220,7 @@ def draw_speedometer(win, kmh, nitro_active=False):
 
 
 def _build_minimap_base():
-    """Pre-render the static parts of the minimap once (panel + path)."""
+    """Track outline inside the rounded box."""
     global _MINIMAP_PATH_SURFACE
     mm_w, mm_h = 140, 140
     surf = pygame.Surface((mm_w, mm_h), pygame.SRCALPHA)
@@ -223,8 +230,8 @@ def _build_minimap_base():
                        border=(120, 220, 255, 200),
                        radius=12, width=2)
     inner = panel_rect.inflate(-12, -12)
-    sx = inner.width / WIDTH
-    sy = inner.height / HEIGHT
+    sx = inner.width / TRACK_VIEW_W
+    sy = inner.height / TRACK_VIEW_H
     pygame.draw.lines(
         surf, (90, 110, 140), True,
         [(inner.x + p[0] * sx, inner.y + p[1] * sy) for p in PATH], 1,

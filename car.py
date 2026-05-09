@@ -3,14 +3,14 @@ import math
 
 import pygame
 
-from assets import RED_CAR
+from assets import RED_CAR, track_to_screen
 from settings import _PATH_SCALE
 
 _CAR_SHADOW_CACHE = {}
 
 
 def get_car_shadow(width, height):
-    """Soft elliptical drop-shadow rendered once per size."""
+    """Cached blur under the car sprite."""
     key = (width, height)
     cached = _CAR_SHADOW_CACHE.get(key)
     if cached is not None:
@@ -31,7 +31,11 @@ def get_car_shadow(width, height):
 
 
 class Car:
-    """Base car physics: speed, acceleration, rotation."""
+    """Shared movement + collision for any car sprite.
+
+    ``x`` and ``y`` are the top-left of the unrotated sprite in **track bitmap**
+    space (same origin as ``PATH`` and collision masks).
+    """
 
     IMG = None
     START_POS = (0, 0)
@@ -67,12 +71,13 @@ class Car:
         shadow_w = int(self.img.get_width() * 0.95)
         shadow_h = max(8, int(self.img.get_height() * 0.32))
         shadow = get_car_shadow(shadow_w, shadow_h)
-        win.blit(shadow, (cx - shadow_w / 2 + 4,
-                          cy - shadow_h / 2 + 8))
-        win.blit(rotated, (cx - mw / 2, cy - mh / 2))
+        sx, sy = track_to_screen(cx - shadow_w / 2 + 4, cy - shadow_h / 2 + 8)
+        win.blit(shadow, (int(sx), int(sy)))
+        tx, ty = track_to_screen(cx - mw / 2, cy - mh / 2)
+        win.blit(rotated, (int(tx), int(ty)))
 
     def drive(self, forward=False, backward=False):
-        """Single entry point for driving (PDF: Car.drive())."""
+        """Throttle from keyboard input."""
         if forward:
             self.vel = min(self.vel + self.acceleration, self.max_vel)
             self._move()
@@ -81,7 +86,7 @@ class Car:
             self._move()
 
     def apply_friction(self):
-        """Coast to a stop when no input (PDF: Car.applyFriction())."""
+        """Slow down when neither forward nor backward is held."""
         if self.vel > 0:
             self.vel = max(self.vel - self.acceleration / 2, 0)
         elif self.vel < 0:
@@ -96,7 +101,7 @@ class Car:
         self.x -= horizontal
 
     def _get_rotated(self):
-        """Return (rotated_image, mask, size) for current angle, cached."""
+        """Rotated sprite + collision mask for this heading (cached per few degrees)."""
         bucket = int(round(self.angle / self.MASK_ANGLE_STEP)
                      * self.MASK_ANGLE_STEP) % 360
         key = (id(self.img), bucket)
@@ -109,8 +114,7 @@ class Car:
         return cached
 
     def check_collision(self, mask, x=0, y=0):
-        """Mask-based collision using a rotated mask aligned with the car's
-        actual on-screen orientation."""
+        """Bitmask overlap; ``x,y`` = top-left of ``mask`` in **track space** (default 0,0)."""
         _, car_mask, (mw, mh) = self._get_rotated()
         cx = self.x + self.img.get_width() / 2
         cy = self.y + self.img.get_height() / 2
@@ -144,7 +148,7 @@ class PlayerCar(Car):
         self.nitro_charge = min(self.nitro_charge + seconds, self.nitro_max)
 
     def update_nitro(self, dt, requested):
-        """Activate nitro while requested and charge remains."""
+        """Burn nitro charge while shift is held."""
         if requested and self.nitro_charge > 0:
             self.nitro_active = True
             self.nitro_charge = max(0.0, self.nitro_charge - dt)
@@ -161,10 +165,7 @@ class PlayerCar(Car):
     ]
 
     def bounce_off_wall(self, track):
-        """Wall-slide physics: find the shortest direction out of the wall
-        (= wall normal), push the car there, then project velocity onto the
-        wall tangent so the car keeps moving smoothly along the wall instead
-        of stuttering back-and-forth into it."""
+        """Nudge out of the grass and slide along the wall instead of jittering."""
         saved_x, saved_y = self.x, self.y
         best_normal = None
         best_dist = None

@@ -1,4 +1,4 @@
-"""RaceManager class - controls game state, lap timing, and race flow."""
+"""Lap counter, timers, and nitro burst bookkeeping."""
 import time
 
 _NITRO_BURST_MIN_SECONDS = 0.05
@@ -50,7 +50,7 @@ class RaceManager:
         return time.time() - self._lap_start_time
 
     def track_lap_time(self):
-        """Called when player crosses the finish line correctly."""
+        """Finish-line callback: log lap, maybe mark race finished."""
         now = time.time()
         lap_time = now - self._lap_start_time
         self.lap_times.append(round(lap_time, 3))
@@ -64,7 +64,7 @@ class RaceManager:
         return False
 
     def end_race(self):
-        """Called when every racer (player + AIs) has finished."""
+        """Everyone's done; freeze the session."""
         self.is_game_over = True
 
     def update_max_speed(self, vel):
@@ -78,12 +78,7 @@ class RaceManager:
         self.nitro_duration += dt
 
     def track_nitro_burst(self, active, current_speed_px_per_frame):
-        """Detect nitro activation/deactivation transitions.
-
-        Returns ``(burst_just_ended, duration_s, avg_speed_px_per_frame)``
-        every time the player releases nitro.  When still mid-burst (or
-        not active at all), returns ``(False, 0.0, 0.0)``.
-        """
+        """Edge-detect nitro release → (ended?, seconds, avg speed) or zeros."""
         now = time.time()
         if active:
             if not self._nitro_burst_active:

@@ -1,34 +1,35 @@
-# image sources – formula 67
+# Credits — Formula 67
 
-Here are the reference links (for the instructor / report), plus how the art was actually made.
+What is **not** original art/code is listed here so markers can check licenses.
 
-**AI-generated art (cars)**  
-The car sprites — **`red-car.png`**, **`green-car.png`**, **`purple-car.png`**, **`white-car.png`**, and **`grey-car.png`** — were **drawn / generated with AI** (I used an AI image tool with my own prompts, then exported or touched up the PNGs for the game). They are not taken as a single ready-made pack from a website; the colours are for the player + AI cars.
+## Car sprites (player + AI)
+
+Files in `imgs/`: **red-car.png**, **green-car.png**, **purple-car.png**, **white-car.png**, **grey-car.png**.
+
+I generated these with an **AI image tool** from my own prompts, then exported as PNG and used them as-is or with small edits in an image editor. They are **not** copied from a single downloadable “car pack” site.
+
+## Other bitmaps in `imgs/`
+
+These were found online as **reference / inspiration**; I may have cropped or recoloured them for the game.
+
+| File | Role | Reference |
+|------|------|-----------|
+| grass.png | Background | <https://www.shutterstock.com/th/search/grass-game-texture?dd_referrer=https%3A%2F%2Fwww.google.com%2F> |
+| track.png | Road surface | <https://www.pngwing.com/en/search?q=race+track> |
+| track-border.png | Walls + collision mask source | <https://www.pngwing.com/en/search?q=race+track> |
+| finish.png | Chequered strip | <https://www.freepik.com/premium-vector/background-black-white-squares-chess-board-vector_26468292.htm> |
+
+If I later used AI or hand-drew changes on top of these, the spirit is still: **third-party look-alikes credited here**, **cars are explicitly AI-assisted**.
+
+## Generated in this project (no external image file)
+
+- Everything under **`reports/`** comes from **matplotlib** + `visualize.py` + `stats/*.csv`.  
+- **Menu, HUD, results UI** (panels, podium, charts-on-screen) are drawn with **pygame** in code, not pasted PNGs.
+
+## Libraries
+
+See **requirements.txt** — mainly **pygame**, **matplotlib**, **numpy**, **pandas**.
 
 ---
 
-**folder `imgs/` — other assets + reference links**
-
-- **`grass.png`** (grass / background) — <https://www.shutterstock.com/th/search/grass-game-texture?dd_referrer=https%3A%2F%2Fwww.google.com%2F>
-
-- **`track.png`** (the road you drive on) — <https://www.pngwing.com/en/search?q=race+track>
-
-- **`track-border.png`** (walls; pygame also uses it for the collision mask) — <https://www.pngwing.com/en/search?q=race+track> *(same search family as track)*
-
-- **`finish.png`** (finish line graphic) — <https://www.freepik.com/premium-vector/background-black-white-squares-chess-board-vector_26468292.htm>
-
-*(If any of these were also AI-assisted or edited in an app, say that in the report body — the links are for reference / similar look.)*
-
----
-
-**not really “image downloads”:**
-
-- Charts under `reports/` come from my `visualize.py` + matplotlib + the CSVs in `stats/`, not random PNGs from Google.
-- The post-race screen (bars, panels, etc.) is drawn in pygame in code.
-
----
-
-**wording for the report (if needed)**
-
-- *Car sprites: AI-generated from my prompts; then integrated in the game.*  
-- *Other assets: see links above for reference; [add one line if you also used AI or drew them yourself].*
+*One-line summary for reports:* car sprites — AI from my prompts; track/grass/finish — links above; telemetry charts — my code.

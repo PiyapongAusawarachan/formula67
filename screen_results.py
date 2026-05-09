@@ -18,7 +18,7 @@ def _get_stat_tile_font():
     return _STAT_TILE_VAL_FONT
 
 def _draw_trophy(surface, cx, cy, size, color):
-    """Draw a stylised trophy emblem centred at (cx, cy)."""
+    """Little cup icon for the winner row."""
     s = size
 
     cup_rect = pygame.Rect(cx - s, cy - s, s * 2, int(s * 1.4))
@@ -89,7 +89,7 @@ def _draw_confetti_layer(surface, palette, count=80, seed=0):
         surface.blit(flake, (x, y))
 
 def _draw_stat_icon(surface, kind, cx, cy, size, color):
-    """Tiny single-color icon for the stat tile."""
+    """Pictogram inside a stat tile."""
     s = size
     if kind == "stopwatch":
         pygame.draw.circle(surface, color, (cx, cy + 1), s)
@@ -141,7 +141,7 @@ def _get_stat_tile_font_small():
 
 def _draw_stat_tile(surface, x, y, w, h, label, value, accent,
                     icon=None, compact=False):
-    """Draw a polished "stat card" used on the results screen."""
+    """One of the metric boxes (time, speed, etc.)."""
     rect = pygame.Rect(x, y, w, h)
 
     shadow = pygame.Surface((w + 12, h + 12), pygame.SRCALPHA)
@@ -198,7 +198,7 @@ def _draw_stat_tile(surface, x, y, w, h, label, value, accent,
     surface.blit(val, (x + (w - val.get_width()) // 2, val_y))
 
 def _draw_podium(surface, x, y, w, h, top3):
-    """Draw a stylised 3-D podium visualization for the top 3."""
+    """2nd–1st–3rd blocks + tiny portraits."""
     base_y = y + h - 4
 
     heights = {1: int(h * 0.62), 2: int(h * 0.46), 3: int(h * 0.34)}
@@ -291,19 +291,10 @@ def _draw_podium(surface, x, y, w, h, top3):
 
 def _build_results_panel(race_manager, standings, new_best,
                          panel_size=None, difficulty="MEDIUM"):
-    """Render the entire results overlay onto a single cached surface.
+    """One big surface: gradient bg, standings, stat tiles, podium, lap bars.
 
-    Premium "race report" layout with:
-      - Smooth navy gradient + subtle radial glow background
-      - Big hero header with trophy + dynamic accent color
-      - Glassmorphic standings card with a glowing player row
-      - Five icon stat tiles
-      - 3-D podium + lap-times chart
-
-    The panel is sized to ``panel_size`` (defaults to the current display
-    size) so it always fully covers the background — the previous version
-    used the track-image dimensions, which left grass showing at the top
-    and bottom on displays with a different aspect ratio.
+    Uses the real window size so ultrawide/tall monitors don't show naked
+    grass outside the panel.
     """
     if panel_size is None:
         panel_size = WIN.get_size()

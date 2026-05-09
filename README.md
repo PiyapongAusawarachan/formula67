@@ -1,153 +1,129 @@
 # Formula 67
 
-**Computer Programming 2 — Software and Knowledge Engineering, Kasetsart University**
+## Project description
 
-Arcade racing game with telemetry logging and post-race analysis (Python / pygame).
-
-**Source code** is at the **repository root** (run `pip install` and `python main.py` from this folder after clone).
-
----
-
-## 1. Project overview
-
-This project is a **high-speed arcade racing game** where the player drives a car on a fixed track with optional obstacles. The focus is on **precision driving and speed management**, backed by a **telemetry pipeline** that records live gameplay and exports data for **performance visualization** after each race.
+- **Project by:** Piyapong Ausawarachan  
+- **Course:** Computer Programming II — Software and Knowledge Engineering, Kasetsart University  
+- **Game genre:** Arcade, top-down racing  
+- **What it is:** Python + pygame racer: three laps, AI grid, nitro, obstacles by difficulty. While you play, telemetry goes to `stats/*.csv`; `visualize.py` turns that into `reports/telemetry_report.png`. The long-form write-up (overview, UML, data section) is in [DESCRIPTION.md](DESCRIPTION.md).
 
 ---
 
-## 2. Project review
+## Installation
 
-Typical 2D racing tutorials stop at movement and collision. This project extends that with a **telemetry system** that records granular data (e.g. speed samples, steering events, lap times, collisions, nitro usage) so you can produce **post-race analysis** comparable to a small professional telemetry report.
+### Clone
 
----
+```sh
+git clone https://github.com/PiyapongAusawarachan/formula67.git
+cd formula67
+```
 
-## 3. Programming development
+If the folder name differs, `cd` into wherever you cloned it.
 
-### 3.1 Game concept
+### Virtual environment + dependencies
 
-| Area | Description |
-|------|-------------|
-| **Mechanics** | Keyboard input to accelerate, brake, and steer through corners; mask-based track boundaries. |
-| **Objectives** | Complete **three laps** in the shortest total time while avoiding obstacles that penalize progress. |
-| **Key features** | Nitro boost pads, dynamic obstacle spawning (by difficulty), **real-time HUD** (lap, time, hits, position, nitro, minimap, speedometer). |
+**Windows (cmd / PowerShell):**
 
-### 3.2 Object-oriented implementation
-
-The codebase maps to the required class responsibilities as follows:
-
-| Class | Role | Main module |
-|--------|------|-------------|
-| **Car** | Physics and movement (`drive`, `applyFriction`, mask `checkCollision`). | [`car.py`](car.py) (`Car`, `PlayerCar`) |
-| **Track** | Environment, boundaries, finish line, path / checkpoints. | [`track.py`](track.py) (`Track`) |
-| **RaceManager** | Game state and timing (`startRace`, `trackLapTime`, `resetGame`, lap totals). | [`race.py`](race.py) (`RaceManager`) |
-| **Obstacle / NitroPad** | Interactive elements (`onHit`, `render`, AABB where applicable). | [`obstacle.py`](obstacle.py) |
-| **StatsLogger** | Data collection and CSV export (`logFeature`-style APIs, `export_to_csv`). | [`stats.py`](stats.py) (`StatsLogger`) |
-
-Additional types: **AIRacer** ([`ai_racer.py`](ai_racer.py)), **Leaderboard** ([`stats.py`](stats.py)), UI split across [`screen_menu.py`](screen_menu.py), [`screen_results.py`](screen_results.py), [`hud.py`](hud.py), [`world.py`](world.py).
-
-### 3.3 Algorithms involved
-
-- **Collision detection:** AABB for obstacles and nitro pads; **mask** collision for track borders and finish line.
-- **Sorting:** Leaderboard keeps **top 10** lap times (insertion-style ordering in `Leaderboard`).
-- **Event-driven flow:** Keyboard and finish-line events drive laps, stats sampling, and end-of-race export.
-
----
-
-## 4. Statistical data (project stats)
-
-### 4.1 Data features (≥ five features, ≥ 100 records each over repeated play)
-
-| # | Feature | Purpose | Source (conceptual) | Typical visualization |
-|---|---------|---------|------------------------|-------------------------|
-| 1 | **Speed** (pixels / second) | Driving performance and consistency | Sampled from player velocity | Line chart (speed vs time), histogram |
-| 2 | **Steering input** | Control behaviour, left vs right | `StatsLogger` steering events / counts | Table (count + %), pie chart |
-| 3 | **Lap time** (seconds) | Performance and improvement | `RaceManager` lap timing | Table (mean, min, max, median, std dev) |
-| 4 | **Collision count** (per race / events) | Mistakes and difficulty | Wall + obstacle events | Tables, relation analysis |
-| 5 | **Nitro active duration** (seconds) | Nitro usage efficiency | Nitro bursts from player state | Scatter (e.g. nitro vs speed) |
-
-Sampling is **automatic during gameplay**; accumulating **100+ rows per feature** is done across **multiple races** and/or [`seed_data.py`](seed_data.py) where used.
-
-### 4.2 Data recording
-
-- Data is collected **during gameplay** and written under [`stats/`](stats/) as **CSV** files.
-- After each finished race, logs are flushed/exported as configured in `StatsLogger` / `main.py`.
-
-### 4.3 Analysis report (visualize)
-
-The reporting pipeline ([`visualize.py`](visualize.py), output under [`reports/`](reports/)) is aligned with the course expectations:
-
-- **Tables:** e.g. speed summary, steering summary, lap-time statistics (mean, min, max, median, std dev).
-- **Graphs (multiple types, no duplicate type required in one report):** e.g. **line** (speed vs time), **histogram** (speed distribution), **scatter** (nitro vs speed), **pie** (steering left/right share).
-
-Exact charts depend on the current `visualize.py` implementation and available CSV columns.
-
----
-
-## 5. Project planning timeline (from proposal)
-
-| Week | Task |
-|------|------|
-| 8 | Proposal submission / project initiation |
-| 9 | Core movement and OOP structure |
-| 10 | Track design and collision detection |
-| 11 | StatsLogger + CSV integration |
-| 12 | Data collection (gameplay → 100+ records per feature) |
-| 13 | Data visualization and analysis report |
-| 14 | Submission week (draft) |
-
----
-
-## 6. Document version (proposal PDF)
-
-| Field | Value |
-|--------|--------|
-| **Version** | 4.0 |
-| **Date** | 6 March 2025 |
-| **Editor** | Piyapong Ausawarachan |
-
----
-
-## Quick start
-
-```bash
-cd formula
+```bat
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+**macOS / Linux:**
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+---
+
+## Running guide
+
+Activate `.venv` and stay in the **repository root**.
+
+**Windows:**
+
+```bat
 python main.py
 ```
 
-(If the repo is not in a folder named `formula`, `cd` into your clone root first — e.g. `cd ~/Documents/formula` from `Documents`.)
+**macOS / Linux:**
 
-**Telemetry dashboard (matplotlib; writes PNG under `reports/`, e.g. `telemetry_report.png`):**
+```sh
+python3 main.py
+```
 
-```bash
-cd formula
+**Regenerate the telemetry PNG** (same data your submission screenshots should show):
+
+```sh
 python visualize.py
 ```
 
----
-
-## Repository layout
-
-| Path | Description |
-|------|-------------|
-| [`main.py`](main.py) | Game loop and state machine |
-| [`settings.py`](settings.py) | Difficulty presets, path geometry, timing |
-| [`assets.py`](assets.py) | Display, fonts, sprites |
-| [`car.py`](car.py) | Car / `PlayerCar` |
-| [`track.py`](track.py), [`obstacle.py`](obstacle.py), [`race.py`](race.py) | Track, obstacles, race manager |
-| [`stats.py`](stats.py) | `StatsLogger`, `Leaderboard`, CSV paths |
-| [`visualize.py`](visualize.py) | Report generation |
-| [`stats/`](stats/) | Runtime CSV telemetry |
-| [`reports/`](reports/) | Generated charts (PNG) |
-| [`ATTRIBUTION.md`](ATTRIBUTION.md) | Image credits (informal list for class) |
+On Windows, if `python3` is missing, use `python` for all commands above.
 
 ---
 
-## Controls (in-game)
+## Tutorial / usage
 
-- **W / S** — accelerate / brake  
-- **A / D** — steer  
-- **Shift** — nitro (when charged)  
-- **F11** — toggle fullscreen  
-- **Esc** — quit  
+1. **`main.py`** — start here.  
+2. **Menu:** click a difficulty card, or press **1 / 2 / 3**, or **← →** / **A D**. **Space** starts the light sequence.  
+3. **Driving:** **WASD** — **W/S** gas / brake, **A/D** steer (arrow keys do the same), **Shift** nitro when the bar has charge. Hit nitro pads on the track.  
+4. Finish **3 laps** crossing the start/finish the right way (same as real circuits: you need sequence + direction the game expects).  
+5. **Results** screen shows order and stats; CSVs on disk update for that race.  
+6. **F11** fullscreen, **Esc** quit.
 
-Menu: choose difficulty (click, **1 / 2 / 3**, or **← / →** / **A / D**), **Space** to start.
+If `stats/` is thin, you can run `python seed_data.py` once (see that file’s docstring) to bulk-fill demo rows before recording your video.
+
+---
+
+## Game features
+
+- Grass collision via **mask**; finish line also mask-based  
+- Obstacles + nitro pads use **bounding boxes** vs the car rect  
+- **3 difficulties** — obstacle count + AI parameters  
+- **HUD:** lap, race time, collision count, position, nitro bar, minimap, speedometer  
+- **Data:** live logging → **CSVs** → **matplotlib** dashboard PNG  
+- **Leaderboard:** `leaderboard.csv` (best laps)
+
+---
+
+## Known bugs
+
+- Fullscreen + multi-monitor / HiDPI can act weird on some setups; **F11** again or run windowed if needed.  
+- If anything else breaks, note the OS + pygame version — I tested mainly on macOS and standard pygame installs.
+
+---
+
+## Unfinished work
+
+- Fancy export formats (PDF report, extra pages) — not required; the course figure is the PNG from `visualize.py`.  
+- **You must** paste your real **YouTube** link into [DESCRIPTION.md](DESCRIPTION.md) before the hard deadline. Gameplay and visualization screenshots are already under `screenshots/`.  
+- GitHub **releases/tags** (`22_Apr_Version`, `10_May_Version`) and the class spreadsheet are on you — I can’t click “submit” for you.
+
+---
+
+## External sources
+
+- **Libraries:** pygame, matplotlib, pandas — pinned loosely in [requirements.txt](requirements.txt).  
+- **Art / credits:** [ATTRIBUTION.md](ATTRIBUTION.md)  
+- **License:** [LICENSE](LICENSE) (MIT)
+
+---
+
+## Repo map
+
+| Path | Role |
+|------|------|
+| `main.py` | Game loop |
+| `car.py`, `track.py`, `race.py`, `obstacle.py`, `ai_racer.py` | Core simulation |
+| `world.py`, `hud.py`, `screen_menu.py`, `screen_results.py`, `race_intro.py` | Drawing + UI |
+| `stats.py` | Logging + leaderboard |
+| `visualize.py` | Charts |
+| `stats/` | CSV telemetry |
+| `reports/` | Output PNG |
+| `screenshots/` | Gameplay + visualization screenshots required for submission |
+| `docs/` | Proposal, UML PDFs, and submission checklist |
+| `DESCRIPTION.md` | Full project description for grading |

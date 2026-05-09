@@ -1,4 +1,4 @@
-"""Main menu: difficulty cards, start button, leaderboard panel."""
+"""Menu UI (difficulty, start, leaderboard)."""
 import pygame
 
 from assets import (
@@ -21,25 +21,24 @@ _START_BTN_CACHE = None
 _TELEMETRY_MENU_RECT = None
 _STATICS_BTN_CACHE = None
 
-# Full-screen menu layer (everything except Start button) — rebuilt only when
-# difficulty, leaderboard, or window size changes. Saves heavy per-frame draws.
+# Menu bitmap cached until difficulty, leaderboard, or resolution changes.
 _MENU_COMPOSITE = None
 _MENU_COMPOSITE_SIG = None
 
-# Track snapshot + composite merged (one blit instead of two per frame).
+# Frozen track+menu merge (one blit per frame after that).
 _MENU_MERGED_BASE = None
 _MENU_MERGED_SIG = None
 
 
 def _build_menu_static():
-    """Build text surfaces that never change while on the menu."""
+    """Title + hints that don't change until locale/font changes."""
     title = render_text_with_shadow(
         TITLE_FONT, "FORMULA 67",
         color=(255, 220, 110), shadow_color=(0, 0, 0), offset=4)
     subtitle = HUD_FONT.render(
         "3-Lap Time Trial", True, (200, 220, 255))
     hint = HUD_FONT_SMALL.render(
-        "W/S = drive   A/D = steer   SHIFT = nitro   "
+        "WASD = drive & steer   (↑↓←→ same)   SHIFT = nitro   "
         "F11 = fullscreen   ESC = quit   V = statics",
         True, (180, 200, 230))
     diff_hint = HUD_FONT_SMALL.render(
@@ -96,7 +95,7 @@ def _build_statics_button(w, h, hovering):
 
 
 def _draw_diff_icon(surf, kind, cx, cy, color):
-    """Draw a small stylised emblem for each difficulty tier."""
+    """Small badge art per difficulty."""
     if kind == "shield":
 
         pts = [
@@ -143,7 +142,7 @@ def _draw_diff_icon(surf, kind, cx, cy, color):
 
 
 def _build_difficulty_picker(selected_id):
-    """Render the three difficulty cards into a single Surface."""
+    """All three difficulty cards on one surface."""
     card_w, card_h = 230, 138
     gap = 22
     n = len(DIFFICULTY_ORDER)
@@ -226,7 +225,7 @@ def _build_difficulty_picker(selected_id):
 
 
 def _build_leaderboard_panel(leaderboard):
-    """Render the leaderboard panel into one cached surface."""
+    """Top-10 strip for the menu."""
     board_w, board_h = 400, 320
     panel = pygame.Surface((board_w, board_h), pygame.SRCALPHA)
     rect = pygame.Rect(0, 0, board_w, board_h)
@@ -263,8 +262,7 @@ def _invalidate_menu_composite():
 
 
 def invalidate_menu_caches():
-    """After fullscreen/resize or when rebuilding the track snapshot, drop menu
-    pixel caches so layers match the display."""
+    """Dump cached menu layers (resize / new track snapshot)."""
     _invalidate_menu_composite()
 
 
@@ -400,8 +398,7 @@ def draw_start_screen(win, track_snapshot, race_manager, leaderboard,
 
 
 def draw_waiting_overlay(win, race_manager, ai_racers):
-    """Translucent banner shown after the player finishes while AI cars
-    are still on track."""
+    """Banner while you wait for AI bots to limp over the line."""
     remaining = sum(1 for ai in ai_racers if ai.finish_time is None)
     if remaining == 0:
         return

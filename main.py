@@ -1,8 +1,4 @@
-"""Formula 67 - Arcade Racing Game (entry point).
-
-See settings.py, assets.py, car.py, world.py, screen_menu.py, screen_results.py,
-and race_intro.py for the split implementation.
-"""
+"""Formula 67 entry point (game loop lives here; rest is split across modules)."""
 import time
 
 import pygame
@@ -14,6 +10,7 @@ from assets import (
     FINISH,
     FINISH_POSITION,
     HEIGHT,
+    PLAYFIELD_RECT,
     TRACK_BORDER,
     TRACK_BORDER_MASK,
     TRACK_SURFACE,
@@ -36,7 +33,12 @@ from settings import (
     RACE_BEGINS_AT,
 )
 from stats import Leaderboard, StatsLogger
-from standings import compute_standings
+from standings import compute_standings, player_progress_score
+from telemetry_extra import (
+    SectorTimer,
+    gap_progress_units,
+    nearest_path_index,
+)
 from track import Track
 from world import (
     draw_world,
@@ -45,11 +47,18 @@ from world import (
     handle_track_collision,
 )
 
-try:
-    from visualize import build_embedded_telemetry_viewer, generate_report
-except ImportError:
-    generate_report = None
-    build_embedded_telemetry_viewer = None
+
+def _import_visualize():
+    """matplotlib/pandas are heavy — load only when charts are needed."""
+    try:
+        mod = __import__(
+            "visualize",
+            fromlist=["build_embedded_telemetry_viewer", "generate_report"],
+        )
+        return mod.build_embedded_telemetry_viewer, mod.generate_report
+    except ImportError:
+        return None, None
+
 
 _MENU_BG_SNAPSHOT = None
 _RESULTS_BG_SNAPSHOT = None
@@ -75,7 +84,8 @@ def main():
     ai_racers = build_ai_racers(selected_difficulty)
 
     clock = pygame.time.Clock()
-    finish_state = {"was_on": False, "just_finished": False}
+    finish_state = {"was_on": False, "just_finished": False,
+                    "lap_started_next": False}
     state = "menu"
     last_summary_logged = False
     new_best = False
@@ -83,9 +93,11 @@ def main():
     countdown_started_at = None
     telemetry_viewer = None
     visualization_return = "menu"
+    sector_timer = SectorTimer()
 
     def try_open_visualization(from_state: str):
         nonlocal telemetry_viewer, visualization_return, state
+        build_embedded_telemetry_viewer, _ = _import_visualize()
         if build_embedded_telemetry_viewer is None:
             return
         viewer = build_embedded_telemetry_viewer(
@@ -118,7 +130,8 @@ def main():
             pad.cooldown = 0
         for ai in ai_racers:
             ai.reset()
-        finish_state = {"was_on": False, "just_finished": False}
+        finish_state = {"was_on": False, "just_finished": False,
+                        "lap_started_next": False}
         last_summary_logged = False
         new_best = False
         final_standings = []
@@ -129,6 +142,7 @@ def main():
         nonlocal state
         race_manager.start_race()
         stats_logger.start_race()
+        sector_timer.on_race_start(time.time())
         race_start = race_manager._race_start_time
         for ai in ai_racers:
             ai.start(race_start)
@@ -252,7 +266,8 @@ def main():
                                standings, show_overlays=True)
                     go = race_intro.COUNTDOWN_GO_TEXT
                     WIN.blit(go,
-                             (WIDTH // 2 - go.get_width() // 2, 80))
+                             (PLAYFIELD_RECT.centerx - go.get_width() // 2,
+                              PLAYFIELD_RECT.centery - go.get_height() // 2))
                     pygame.display.update()
                     clock.tick(FPS)
             else:
@@ -280,9 +295,33 @@ def main():
                 finish_state = handle_track_collision(
                     player_car, track, race_manager, finish_state,
                     stats_logger)
+                if finish_state.get("lap_started_next"):
+                    sector_timer.on_new_lap(time.time())
+                    finish_state["lap_started_next"] = False
 
                 race_manager.update_max_speed(player_car.vel)
-                stats_logger.sample_speed(abs(player_car.vel))
+                standings = compute_standings(player_car, ai_racers,
+                                              race_manager, PATH)
+                cx = player_car.x + player_car.img.get_width() / 2
+                cy = player_car.y + player_car.img.get_height() / 2
+                pidx = nearest_path_index(player_car, PATH)
+                pprog = player_progress_score(player_car, race_manager, PATH)
+                gap = gap_progress_units(standings, pprog)
+                stats_logger.telemetry_bundle(
+                    abs(player_car.vel),
+                    cx, cy, pidx, race_manager.current_lap,
+                    keys[pygame.K_w] or keys[pygame.K_UP],
+                    keys[pygame.K_s] or keys[pygame.K_DOWN],
+                    nitro_requested,
+                    gap,
+                )
+                sector_timer.tick(
+                    player_car, track.checkpoints,
+                    race_manager.current_lap,
+                    stats_logger.race_id,
+                    stats_logger,
+                    time.time(),
+                )
             else:
 
                 player_car.update_nitro(dt, False)
@@ -293,11 +332,16 @@ def main():
 
             standings = compute_standings(player_car, ai_racers,
                                           race_manager, PATH)
-            draw_world(WIN, track, obstacles, nitro_pads,
-                       player_car, ai_racers, race_manager, standings)
 
             if race_manager.player_finished:
+                draw_world(WIN, track, obstacles, nitro_pads,
+                           player_car, ai_racers, race_manager, standings,
+                           show_overlays=True)
                 draw_waiting_overlay(WIN, race_manager, ai_racers)
+            else:
+                draw_world(WIN, track, obstacles, nitro_pads,
+                           player_car, ai_racers, race_manager, standings,
+                           show_overlays=True)
 
             all_finished = (
                 race_manager.player_finished
@@ -313,20 +357,6 @@ def main():
                     race_finished=True)
                 stats_logger.log_competitor_results(final_standings)
                 stats_logger.export_to_csv()
-                if generate_report is not None:
-                    try:
-                        report_path = generate_report(
-                            stats_dir=asset_path("stats"),
-                            out_dir=asset_path("reports"),
-                            open_browser=False,
-                        )
-                        if report_path:
-                            print(f"[stats] report updated -> "
-                                  f"{report_path}")
-                            print("[stats] open it with:  "
-                                  "python visualize.py")
-                    except Exception as exc:
-                        print(f"[stats] could not build dashboard: {exc}")
                 if summary["best_lap"] is not None:
                     before = leaderboard.top(leaderboard.MAX_ENTRIES)
                     worst_before = (before[-1]["lap_time"]
@@ -351,6 +381,7 @@ def main():
                 WIN, race_manager, leaderboard,
                 final_standings, new_best,
                 difficulty=selected_difficulty)
+            continue
 
     pygame.quit()
 

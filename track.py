@@ -1,5 +1,7 @@
-"""Track class - handles environment, boundaries, and checkpoints."""
+"""Track bitmaps, grass mask, finish trigger."""
 import pygame
+
+from assets import PLAYFIELD_RECT
 
 
 class Track:
@@ -31,6 +33,7 @@ class Track:
         return list(self.boundary_points)
 
     def is_out_of_bounds(self, car):
+        # Car x/y and masks stay in track-bitmap space; PLAYFIELD_* is draw-only.
         return car.check_collision(self.border_mask) is not None
 
     def at_finish_line(self, car):
@@ -39,6 +42,8 @@ class Track:
         )
 
     def draw(self, win):
-        win.blit(self.surface, (0, 0))
-        win.blit(self.finish_surface, self.finish_position)
-        win.blit(self.border_surface, (0, 0))
+        ox, oy = PLAYFIELD_RECT.topleft
+        win.blit(self.surface, (ox, oy))
+        win.blit(self.finish_surface,
+                 (ox + self.finish_position[0], oy + self.finish_position[1]))
+        win.blit(self.border_surface, (ox, oy))

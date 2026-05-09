@@ -1,4 +1,4 @@
-"""AI grid setup and F1-style pre-race countdown overlay."""
+"""Light bar + five reds before go."""
 import random
 
 import pygame
@@ -7,11 +7,10 @@ from ai_racer import AIRacer
 from assets import (
     GREEN_CAR,
     HUD_FONT,
+    PLAYFIELD_RECT,
     PURPLE_CAR,
     TRACK_BORDER_MASK,
     WHITE_CAR,
-    WIDTH,
-    HEIGHT,
 )
 from car import PlayerCar
 from settings import DIFFICULTIES, LIGHT_INTERVAL, LIGHTS_OUT_AT, PATH
@@ -30,37 +29,60 @@ def build_ai_racers(difficulty="MEDIUM"):
     common = dict(
         max_vel=4.5 * sm, rotation_vel=4.5 * rm,
         path=PATH, start_offset=0, start_pos=start,
-        border_mask=TRACK_BORDER_MASK, safety_margin=14,
+        border_mask=TRACK_BORDER_MASK, safety_margin=20,
         apex_strength=apex, corner_aggression=corner,
         accel_rate=accel,
     )
 
     driver_pool = [
         dict(name="Verstappen", accent_color=(190, 130, 230),
-             racing_line_offset=8,  lookahead_bias=8),
+             racing_line_offset=11, lookahead_bias=10,
+             line_variance=3.5, avoidance_strength=1.10,
+             lateral_offset=-12, longitudinal_offset=0,
+             speed_mult=1.03, rotation_mult=1.02),
         dict(name="Hamilton",   accent_color=(120, 200, 255),
-             racing_line_offset=4,  lookahead_bias=4),
+             racing_line_offset=5,  lookahead_bias=5,
+             line_variance=5.5, avoidance_strength=1.18,
+             lateral_offset=0, longitudinal_offset=-10,
+             speed_mult=1.00, rotation_mult=1.04),
         dict(name="Leclerc",    accent_color=(110, 230, 130),
-             racing_line_offset=-2, lookahead_bias=-6),
+             racing_line_offset=-5, lookahead_bias=-7,
+             line_variance=4.0, avoidance_strength=1.22,
+             lateral_offset=-18, longitudinal_offset=-20,
+             speed_mult=0.99, rotation_mult=1.06),
         dict(name="Norris",     accent_color=(255, 180, 90),
-             racing_line_offset=-4, lookahead_bias=2),
+             racing_line_offset=-10, lookahead_bias=2,
+             line_variance=7.0, avoidance_strength=1.15,
+             lateral_offset=-6, longitudinal_offset=-30,
+             speed_mult=1.01, rotation_mult=0.98),
         dict(name="Russell",    accent_color=(230, 230, 240),
-             racing_line_offset=-6, lookahead_bias=0),
+             racing_line_offset=0, lookahead_bias=-1,
+             line_variance=8.5, avoidance_strength=1.28,
+             lateral_offset=-12, longitudinal_offset=-40,
+             speed_mult=0.98, rotation_mult=1.08),
     ]
     car_sprites = [PURPLE_CAR, WHITE_CAR, GREEN_CAR]
 
     chosen = random.sample(driver_pool, k=len(car_sprites))
     random.shuffle(car_sprites)
+    grid_slots = [(-36, 10), (-36, -40), (-36, -90)]
 
     racers = []
-    for sprite, profile in zip(car_sprites, chosen):
+    for sprite, profile, (lat, lon) in zip(car_sprites, chosen, grid_slots):
+        racer_args = dict(common)
+        racer_args["max_vel"] *= profile["speed_mult"]
+        racer_args["rotation_vel"] *= profile["rotation_mult"]
         racers.append(
             AIRacer(
                 profile["name"], sprite,
                 accent_color=profile["accent_color"],
                 racing_line_offset=profile["racing_line_offset"],
                 lookahead_bias=profile["lookahead_bias"] + lb,
-                **common,
+                line_variance=profile["line_variance"],
+                avoidance_strength=profile["avoidance_strength"],
+                lateral_offset=lat,
+                longitudinal_offset=lon,
+                **racer_args,
             )
         )
     return racers
@@ -73,7 +95,7 @@ _COUNTDOWN_READY_TEXT = None
 
 
 def _build_lights_gantry(width, height):
-    """Render the dark steel gantry frame the lights sit in."""
+    """Metal frame behind the starting lights."""
     surf = pygame.Surface((width, height), pygame.SRCALPHA)
     body = pygame.Rect(0, 0, width, height)
     draw_rounded_panel(surf, body,
@@ -96,7 +118,7 @@ def _build_lights_gantry(width, height):
 
 
 def _draw_light(surf, cx, cy, radius, lit, color_on):
-    """Draw a single round bulb. When lit, emit a soft glow halo."""
+    """One lamp; brighter blob when lit."""
 
     pygame.draw.circle(surf, (10, 10, 14), (cx, cy), radius + 4)
     pygame.draw.circle(surf, (50, 55, 70), (cx, cy), radius + 4, 2)
@@ -124,10 +146,7 @@ def _draw_light(surf, cx, cy, radius, lit, color_on):
 
 
 def draw_countdown_overlay(win, elapsed):
-    """F1-style 5-light start sequence centred on screen.
-
-    `elapsed` is seconds since the countdown was triggered.
-    """
+    """Red lights sequence; ``elapsed`` = seconds since start."""
     global _COUNTDOWN_DIM_CACHE, _COUNTDOWN_GANTRY_CACHE
     global COUNTDOWN_GO_TEXT, _COUNTDOWN_READY_TEXT
 
@@ -158,8 +177,9 @@ def draw_countdown_overlay(win, elapsed):
                 (gantry_w, gantry_h),
                 _build_lights_gantry(gantry_w, gantry_h),
             )
-        gx = WIDTH // 2 - gantry_w // 2
-        gy = HEIGHT // 2 - gantry_h // 2 - 20
+        r = PLAYFIELD_RECT
+        gx = r.centerx - gantry_w // 2
+        gy = r.centery - gantry_h // 2 - 20
 
         bulb_surf = _COUNTDOWN_GANTRY_CACHE[1].copy()
         radius = 28
@@ -179,12 +199,12 @@ def draw_countdown_overlay(win, elapsed):
         else:
             sub_text = _COUNTDOWN_READY_TEXT
         win.blit(sub_text,
-                 (WIDTH // 2 - sub_text.get_width() // 2,
+                 (PLAYFIELD_RECT.centerx - sub_text.get_width() // 2,
                   gy + gantry_h + 18))
     else:
 
         win.blit(COUNTDOWN_GO_TEXT,
-                 (WIDTH // 2 - COUNTDOWN_GO_TEXT.get_width() // 2,
-                  HEIGHT // 2 - COUNTDOWN_GO_TEXT.get_height() // 2))
+                 (PLAYFIELD_RECT.centerx - COUNTDOWN_GO_TEXT.get_width() // 2,
+                  PLAYFIELD_RECT.centery - COUNTDOWN_GO_TEXT.get_height() // 2))
 
     pygame.display.update()

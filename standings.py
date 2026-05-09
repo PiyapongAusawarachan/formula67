@@ -1,8 +1,8 @@
-"""Compute race positions for HUD and results."""
+"""Who's ahead (for HUD + end screen)."""
 
 
 def player_progress_score(player_car, race_manager, path):
-    """Estimate the player's progress as lap*len(path) + nearest_path_index."""
+    """Lap number * path length + nearest waypoint index."""
     px = player_car.x + player_car.img.get_width() / 2
     py = player_car.y + player_car.img.get_height() / 2
     best_i = 0
@@ -18,8 +18,7 @@ def player_progress_score(player_car, race_manager, path):
 
 def compute_standings(player_car, ai_racers, race_manager, path,
                       race_finished=False):
-    """Return a sorted list of dicts: [{'name','is_player','finish_time',
-    'lap','progress','color'}, ...] best first."""
+    """Sorted racer dicts, fastest / farthest first."""
     entries = []
     if race_finished and race_manager.lap_times:
         player_finish = sum(race_manager.lap_times)

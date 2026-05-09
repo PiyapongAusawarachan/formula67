@@ -15,7 +15,7 @@ def blit_rotate_center(win, image, top_left, angle):
 
 def render_text_with_shadow(font, text, color=(240, 240, 245),
                             shadow_color=(0, 0, 0), offset=2):
-    """Render text with a soft drop shadow for better readability."""
+    """Text + faint shadow."""
     base = font.render(text, True, color)
     shadow = font.render(text, True, shadow_color)
     surface = pygame.Surface(
@@ -29,7 +29,7 @@ def render_text_with_shadow(font, text, color=(240, 240, 245),
 
 
 def blit_text_center(win, font, text):
-    """Centered modal-style banner with dimmed background and glowing text."""
+    """Full-screen dim + message box in the middle."""
     overlay = pygame.Surface(win.get_size(), pygame.SRCALPHA)
     overlay.fill((5, 8, 20, 170))
     win.blit(overlay, (0, 0))
@@ -56,7 +56,7 @@ def blit_text_center(win, font, text):
 
 def draw_rounded_panel(win, rect, fill=(15, 18, 32, 200),
                        border=(90, 200, 255, 220), radius=14, width=2):
-    """Draw a translucent rounded panel with a colored border."""
+    """Rounded rect with alpha."""
     panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
     pygame.draw.rect(panel, fill, panel.get_rect(), border_radius=radius)
     pygame.draw.rect(panel, border, panel.get_rect(),
@@ -68,7 +68,7 @@ _GRADIENT_CACHE = {}
 
 
 def _get_gradient_strip(width, height, fg, radius):
-    """Return a cached full-width rounded gradient strip."""
+    """Horizontal gradient bar (cached)."""
     key = (width, height, fg, radius)
     cached = _GRADIENT_CACHE.get(key)
     if cached is not None:
@@ -91,8 +91,7 @@ def _get_gradient_strip(width, height, fg, radius):
 def draw_progress_bar(win, rect, value, max_value,
                       fg=(80, 220, 255), bg=(40, 50, 70),
                       border=(200, 220, 255), radius=6):
-    """Draw a rounded progress bar (e.g. speedometer). Uses a cached
-    pre-rendered gradient strip — only the visible portion is blitted."""
+    """Filled bar using the cached gradient strip."""
     pct = max(0.0, min(1.0, value / max_value if max_value else 0))
 
     bg_key = ("bg", rect.width, rect.height, bg, radius)
@@ -117,7 +116,7 @@ _VIGNETTE_CACHE = {}
 
 
 def draw_vignette(win):
-    """Soft dark vignette around the edges. Cached per window size."""
+    """Darken the screen borders a bit."""
     size = win.get_size()
     vignette = _VIGNETTE_CACHE.get(size)
     if vignette is None:

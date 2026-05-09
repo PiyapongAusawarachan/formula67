@@ -1,15 +1,19 @@
-"""Obstacle and NitroPad classes - interactive elements on the track.
+"""Track hazards + nitro pads (rectangle hits vs the car).
 
-Uses Axis-Aligned Bounding Box (AABB) collision detection.
+Positions are in **track space** (see ``assets`` module docstring). Rendering
+uses ``track_to_screen``; collision with the car uses ``car.rect`` in the same
+space.
 """
 import math
 import random
 
 import pygame
 
+from assets import track_to_screen
+
 
 class Obstacle:
-    """Static obstacle that decreases the car's speed on hit."""
+    """Cone / barrel / oil slick — clips speed on first contact."""
 
     TYPES = {
         "cone": {"color": (255, 140, 30), "radius": 10, "penalty": 0.6},
@@ -38,13 +42,11 @@ class Obstacle:
         return pygame.Rect(x - r, y - r, r * 2, r * 2)
 
     def aabb_collides_with(self, car_rect):
-        """AABB collision detection between this obstacle and a car rect."""
+        """Cheap rect overlap test."""
         return self.rect.colliderect(car_rect)
 
     def update_collision(self, car_rect):
-        """Edge-triggered hit detection. Returns True only on the frame
-        the car ENTERS the obstacle (so a car parked on top isn't hit
-        every frame)."""
+        """True only on the frame we enter the hitbox (not every frame parked on it)."""
         if not self.active:
             self._was_hitting = False
             return False
@@ -54,7 +56,7 @@ class Obstacle:
         return just_entered
 
     def on_hit(self, car):
-        """Apply speed penalty to the car. Returns True if a hit occurred."""
+        """Slow the car down; oil also kicks the angle a bit."""
         if not self.active:
             return False
         if self.type == "oil":
@@ -98,12 +100,13 @@ class Obstacle:
             sprite = self._build_sprite()
             Obstacle._RENDER_CACHE[self.type] = sprite
         x, y = self.position
-        win.blit(sprite, (x - sprite.get_width() // 2,
-                          y - sprite.get_height() // 2))
+        tx, ty = track_to_screen(x - sprite.get_width() // 2,
+                                 y - sprite.get_height() // 2)
+        win.blit(sprite, (int(tx), int(ty)))
 
 
 class NitroPad:
-    """Boost pad that grants temporary nitro charge to the player."""
+    """Drive over it to refill shift-boost."""
 
     def __init__(self, position, charge=2.0):
         self.position = position
@@ -179,17 +182,19 @@ class NitroPad:
             alpha = int(60 + 60 * pulse)
             glow_sprite.set_alpha(alpha)
             gw = glow_sprite.get_width()
-            win.blit(glow_sprite, (x - gw // 2, y - gw // 2))
+            gx, gy = track_to_screen(x - gw // 2, y - gw // 2)
+            win.blit(glow_sprite, (int(gx), int(gy)))
             base = ready_sprite
         else:
             base = cooldown_sprite
 
         bw = base.get_width()
-        win.blit(base, (x - bw // 2, y - bw // 2))
+        bx, by = track_to_screen(x - bw // 2, y - bw // 2)
+        win.blit(base, (int(bx), int(by)))
 
 
 def spawn_obstacles(path, count, seed=None):
-    """Dynamic obstacle spawning along the racing path (skips first/last)."""
+    """Scatter ``count`` things on middle path nodes."""
     rng = random.Random(seed)
     obstacles = []
     if len(path) < 4:

@@ -1,9 +1,10 @@
-"""Track view rendering and per-frame gameplay helpers."""
+"""Blit the world + input + collisions (stuff too big for main.py)."""
 import math
 
 import pygame
 
-from assets import GRASS
+from assets import GRASS, track_to_screen
+from scenery import draw_spectator_scenery
 from settings import KMH_FACTOR
 from utils import draw_vignette
 
@@ -22,6 +23,7 @@ def draw_world(win, track, obstacles, nitro_pads, player_car, ai_racers,
                update_display=True):
     win.blit(GRASS, (0, 0))
     track.draw(win)
+    draw_spectator_scenery(win)
 
     for pad in nitro_pads:
         pad.render(win)
@@ -49,7 +51,8 @@ def draw_world(win, track, obstacles, nitro_pads, player_car, ai_racers,
             offset = (i + 1) * 8
             fx = cx + sin_a * offset
             fy = cy + cos_a * offset
-            win.blit(flame, (fx - 5, fy - 5))
+            fx, fy = track_to_screen(fx - 5, fy - 5)
+            win.blit(flame, (int(fx), int(fy)))
 
     draw_vignette(win)
     if show_overlays:
@@ -70,11 +73,17 @@ def handle_input(player_car, race_manager, keys, stats_logger=None):
         race_manager.register_steering("left")
         if stats_logger is not None:
             stats_logger.log_steering_event("left")
+            if abs(player_car.vel) > 2.2:
+                stats_logger.log_cornering_event(
+                    race_manager.current_lap, "left", abs(player_car.vel))
     if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
         player_car.rotate(right=True)
         race_manager.register_steering("right")
         if stats_logger is not None:
             stats_logger.log_steering_event("right")
+            if abs(player_car.vel) > 2.2:
+                stats_logger.log_cornering_event(
+                    race_manager.current_lap, "right", abs(player_car.vel))
     if keys[pygame.K_w] or keys[pygame.K_UP]:
         moved = True
         player_car.drive(forward=True)
@@ -111,7 +120,7 @@ def handle_obstacles_and_nitro(player_car, obstacles, nitro_pads,
 
 def handle_track_collision(player_car, track, race_manager, finish_state,
                            stats_logger=None):
-    """Wall collision + finish-line lap counting. Returns updated state."""
+    """Grass bounce + start/finish line. Updates ``finish_state`` in place."""
     if track.is_out_of_bounds(player_car):
         was_safe = getattr(player_car, "_was_on_track", True)
         player_car.bounce_off_wall(track)
@@ -130,6 +139,7 @@ def handle_track_collision(player_car, track, race_manager, finish_state,
         if finish_collision[1] != 0:
             done = race_manager.track_lap_time()
             finish_state["just_finished"] = done
+            finish_state["lap_started_next"] = not done
 
     finish_state["was_on"] = on_finish
     return finish_state

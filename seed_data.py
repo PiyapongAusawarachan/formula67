@@ -1,21 +1,12 @@
-"""Seed simulated race data to meet the proposal's 100-record threshold.
+"""Fill ``stats/`` with synthetic CSV rows for demo / chart testing.
 
-Run once after fresh install (or whenever you want a populated dataset)::
+Commands:
+  python seed_data.py
+  python seed_data.py --races 50
+  python seed_data.py --reset
 
-    python seed_data.py
-    python seed_data.py --races 50      # generate up to 50 total races
-    python seed_data.py --reset          # wipe stats/ first, then seed
-
-What it does:
-  * Preserves any REAL race data already in stats/
-  * Back-fills the new event-level CSVs (steering / collision / nitro)
-    for the existing real races - so they show up in the visualization
-  * Generates additional synthetic races until the target count is met
-  * Every CSV ends with >= 100 records for the proposal requirement
-  * Re-runs visualize.py so the latest report uses the new data
-
-The simulated data uses the *real* first race as a baseline so the
-synthetic races feel like the same player driving the same car.
+Keeps races you already have, patches missing event files, adds fake races,
+then runs ``visualize.py`` so ``reports/`` matches.
 """
 from __future__ import annotations
 
@@ -28,6 +19,8 @@ import shutil
 import statistics
 import time
 from typing import Dict, List, Tuple
+
+from settings import PATH
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATS_DIR = os.path.join(BASE_DIR, "stats")
@@ -72,7 +65,7 @@ def _to_int(v, d=0) -> int:
         return d
 
 def _simulate_lap_times(num_laps: int = 3) -> List[float]:
-    """Three plausible lap times.  First lap usually slowest."""
+    """Made-up lap times; lap 1 a bit slow on purpose."""
     times = []
     for lap in range(num_laps):
         bias = 0.6 if lap == 0 else (-0.4 if lap == num_laps - 1 else 0.0)
@@ -82,11 +75,7 @@ def _simulate_lap_times(num_laps: int = 3) -> List[float]:
 
 def _simulate_speed_samples(start_ts: float, total_time_s: float
                             ) -> List[Tuple[float, float]]:
-    """Return a list of (timestamp, speed_px_per_frame) tuples.
-
-    Models a noisy sinusoidal cruise pattern with occasional braking dips
-    for corners and nitro spikes - matches a real lap roughly.
-    """
+    """(timestamp, speed) points ~every SAMPLE_INTERVAL."""
     samples = []
     n = max(1, int(total_time_s / SAMPLE_INTERVAL))
     cruise = 4.4
@@ -108,7 +97,7 @@ def _simulate_speed_samples(start_ts: float, total_time_s: float
 def _simulate_steering_events(race_id: int, start_ts: float,
                               total_time_s: float
                               ) -> Tuple[List[Dict], int, int]:
-    """Press patterns: short bursts of taps when cornering."""
+    """Random left/right bursts spread over the race."""
     events = []
     t = start_ts
     end = start_ts + total_time_s
@@ -172,12 +161,7 @@ def _simulate_nitro_events(race_id: int, start_ts: float,
 def _backfill_steering_events(steering_aggregates: List[Dict],
                               speed_rows: List[Dict],
                               max_per_race: int = 600) -> List[Dict]:
-    """Convert per-race left/right counts into individual events.
-
-    Spreads them evenly across the race window using the speed CSV's
-    timestamps.  Caps each race at ``max_per_race`` events so the file
-    stays a reasonable size.
-    """
+    """Turn steering.csv aggregates into fake per-press events."""
     out = []
     for agg in steering_aggregates:
         rid = _to_int(agg.get("race_id"))
@@ -300,6 +284,11 @@ def seed(target_races: int = DEFAULT_TARGET_RACES,
     out_steer_evt = list(steer_events_back)
     out_coll_evt  = list(coll_events_back)
     out_nitro_evt = list(nitro_events_back)
+    out_position = _read_csv(os.path.join(STATS_DIR, "position.csv"))
+    out_sector = _read_csv(os.path.join(STATS_DIR, "sector_split.csv"))
+    out_input = _read_csv(os.path.join(STATS_DIR, "input_sample.csv"))
+    out_gap = _read_csv(os.path.join(STATS_DIR, "gap_sample.csv"))
+    out_corner = _read_csv(os.path.join(STATS_DIR, "cornering_event.csv"))
 
     if out_speeds:
         last_ts = max(_to_float(r["timestamp"]) for r in out_speeds)
@@ -340,12 +329,59 @@ def seed(target_races: int = DEFAULT_TARGET_RACES,
                 "timestamp": ts,
                 "speed_px_s": spd,
             })
+        ang0 = random.uniform(0, 6.28)
+        for ts, spd in speed_samples:
+            ang = ang0 + (ts - cursor_ts) / max(total_time, 0.01) * math.pi * 5
+            fx = 400 + 175 * math.cos(ang) + random.gauss(0, 14)
+            fy = 380 + 130 * math.sin(ang * 1.03) + random.gauss(0, 14)
+            pidx = int((ang % (2 * math.pi)) / (2 * math.pi) * len(PATH)) % len(PATH)
+            lap_guess = min(3, max(1, int((ts - cursor_ts) / max(total_time / 3.5, 0.01)) + 1))
+            out_position.append({
+                "race_id": race_id,
+                "timestamp": ts,
+                "lap_number": lap_guess,
+                "path_index": pidx,
+                "x": round(fx, 1),
+                "y": round(fy, 1),
+                "speed_px_s": spd,
+            })
+            out_input.append({
+                "race_id": race_id,
+                "timestamp": ts,
+                "throttle": 1 if spd > 2.5 else random.randint(0, 1),
+                "brake": 1 if spd < 1.2 and random.random() < 0.2 else 0,
+                "nitro": 1 if spd > 6.0 and random.random() < 0.12 else 0,
+            })
+            out_gap.append({
+                "race_id": race_id,
+                "timestamp": ts,
+                "gap_progress": round(random.gauss(1.5, 7.0), 2),
+            })
+        for lap_n in (1, 2, 3):
+            base = random.uniform(5.5, 8.0)
+            for seg in (1, 2, 3):
+                out_sector.append({
+                    "race_id": race_id,
+                    "lap_number": lap_n,
+                    "sector_index": seg,
+                    "split_s": round(base * random.uniform(0.55, 1.05), 3),
+                })
+                base *= random.uniform(0.75, 1.1)
         avg_speed_frame = round(
             statistics.mean(s for _, s in speed_samples), 3)
 
         steer_events, left_n, right_n = _simulate_steering_events(
             race_id, cursor_ts, total_time)
         out_steer_evt.extend(steer_events)
+        for ev in steer_events:
+            if random.random() < 0.4:
+                out_corner.append({
+                    "race_id": race_id,
+                    "timestamp": ev["timestamp"],
+                    "lap_number": random.randint(1, 3),
+                    "direction": ev["direction"],
+                    "speed_frame": round(random.uniform(2.4, 6.2), 3),
+                })
         out_steer.append({
             "race_id": race_id,
             "left_count": left_n,
@@ -417,6 +453,23 @@ def seed(target_races: int = DEFAULT_TARGET_RACES,
                out_competitor,
                ["race_id", "name", "rank", "finish_time_s",
                 "best_lap_s", "lap_reached"])
+    _write_csv(os.path.join(STATS_DIR, "position.csv"),
+               out_position,
+               ["race_id", "timestamp", "lap_number", "path_index",
+                "x", "y", "speed_px_s"])
+    _write_csv(os.path.join(STATS_DIR, "sector_split.csv"),
+               out_sector,
+               ["race_id", "lap_number", "sector_index", "split_s"])
+    _write_csv(os.path.join(STATS_DIR, "input_sample.csv"),
+               out_input,
+               ["race_id", "timestamp", "throttle", "brake", "nitro"])
+    _write_csv(os.path.join(STATS_DIR, "gap_sample.csv"),
+               out_gap,
+               ["race_id", "timestamp", "gap_progress"])
+    _write_csv(os.path.join(STATS_DIR, "cornering_event.csv"),
+               out_corner,
+               ["race_id", "timestamp", "lap_number", "direction",
+                "speed_frame"])
 
     print()
     print("=" * 60)
@@ -429,10 +482,15 @@ def seed(target_races: int = DEFAULT_TARGET_RACES,
     print(f"  steering events    :  {len(out_steer_evt):>6} records")
     print(f"  collision events   :  {len(out_coll_evt):>6} records")
     print(f"  nitro burst events :  {len(out_nitro_evt):>6} records")
+    print(f"  position samples   :  {len(out_position):>6} records")
+    print(f"  sector splits      :  {len(out_sector):>6} records")
+    print(f"  input samples      :  {len(out_input):>6} records")
+    print(f"  gap samples        :  {len(out_gap):>6} records")
+    print(f"  cornering events   :  {len(out_corner):>6} records")
     print("=" * 60)
 
 def _maybe_render(open_browser: bool = True) -> None:
-    """Re-render the dashboard with the new data."""
+    """Call visualize again after writing CSVs."""
     try:
         from visualize import generate_report
     except ImportError:
