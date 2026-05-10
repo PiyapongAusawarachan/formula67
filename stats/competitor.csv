@@ -394,3 +394,11 @@ race_id,name,rank,finish_time_s,best_lap_s,lap_reached
 90,Norris,2,67.355,22.033,4
 90,Hamilton,3,68.416,22.29,4
 90,Russell,4,69.764,22.664,4
+91,You,1,66.091,19.788,3
+91,Verstappen,2,67.047,21.977,4
+91,Leclerc,3,68.88,22.496,4
+91,Russell,4,70.2,22.822,4
+92,You,1,67.354,19.803,3
+92,Verstappen,2,73.325,24.021,4
+92,Norris,3,74.366,24.25,4
+92,Hamilton,4,75.649,24.576,4
