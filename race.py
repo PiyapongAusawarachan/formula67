@@ -12,9 +12,11 @@ class RaceManager:
         self.is_game_over = False
         self.player_finished = False
         self.player_finish_time = None
+        self.player_finish_order = None
         self.started = False
         self._race_start_time = 0.0
         self._lap_start_time = 0.0
+        self._finish_counter = 0
         self.lap_times = []
         self.collision_count = 0
         self.nitro_duration = 0.0
@@ -33,8 +35,10 @@ class RaceManager:
         self.is_game_over = False
         self.player_finished = False
         self.player_finish_time = None
+        self.player_finish_order = None
         self._race_start_time = time.time()
         self._lap_start_time = self._race_start_time
+        self._finish_counter = 0
         self.current_lap = 1
 
     def get_race_time(self):
@@ -59,9 +63,14 @@ class RaceManager:
         if self.current_lap >= self.TOTAL_LAPS:
             self.player_finished = True
             self.player_finish_time = now - self._race_start_time
+            self.player_finish_order = self.next_finish_order()
             return True
         self.current_lap += 1
         return False
+
+    def next_finish_order(self):
+        self._finish_counter += 1
+        return self._finish_counter
 
     def end_race(self):
         """Everyone's done; freeze the session."""
@@ -112,9 +121,11 @@ class RaceManager:
         self.is_game_over = False
         self.player_finished = False
         self.player_finish_time = None
+        self.player_finish_order = None
         self.started = False
         self._race_start_time = 0.0
         self._lap_start_time = 0.0
+        self._finish_counter = 0
         self.lap_times = []
         self.collision_count = 0
         self.nitro_duration = 0.0

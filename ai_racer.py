@@ -6,6 +6,8 @@ import pygame
 
 from assets import track_to_screen
 
+_MIN_AI_LAP_SECONDS = 4.0
+
 
 class AIRacer:
     """CPU car: steers toward a point a bit down the path (stops darting on tight nodes)."""
@@ -53,10 +55,12 @@ class AIRacer:
         self.current_point = (self._start_index + 3) % len(self.personal_path)
         self.lap = 1
         self.finish_time = None
+        self.finish_order = None
         self.race_start_time = None
         self.lap_times = []
         self._lap_start_time = None
         self._points_since_lap_start = 0
+        self._finish_was_on = False
 
         self._rotated_cache = {}
         self._mask_step = 6
@@ -286,10 +290,12 @@ class AIRacer:
         self.lap = 1
         self.current_point = (self._start_index + 3) % len(self.personal_path)
         self.finish_time = None
+        self.finish_order = None
         self.race_start_time = None
         self.lap_times = []
         self._lap_start_time = None
         self._points_since_lap_start = 0
+        self._finish_was_on = False
         self._tick = 0
         self._last_progress_point = self.current_point
         self._stall_frames = 0
@@ -299,6 +305,7 @@ class AIRacer:
         self.race_start_time = race_start_time
         self._lap_start_time = race_start_time
         self.vel = 0
+        self._finish_was_on = False
 
     def progress_score(self):
         """Rough distance into the race (for sorting HUD)."""
@@ -337,6 +344,39 @@ class AIRacer:
         self._move()
         self._recover_from_border()
         self._unstick_if_needed(total_laps)
+
+    def handle_finish_line(self, finish_collision, total_laps,
+                           finish_order_cb=None):
+        if self.finish_time is not None:
+            self._finish_was_on = finish_collision is not None
+            return
+
+        on_finish = finish_collision is not None
+        if on_finish and not self._finish_was_on:
+            if finish_collision[1] != 0:
+                self._record_finish_lap(total_laps, finish_order_cb)
+        self._finish_was_on = on_finish
+
+    def _record_finish_lap(self, total_laps, finish_order_cb=None):
+        if self.race_start_time is None or self._lap_start_time is None:
+            return False
+
+        now = time.time()
+        lap_time = now - self._lap_start_time
+        if lap_time < _MIN_AI_LAP_SECONDS:
+            return False
+
+        self.lap_times.append(round(lap_time, 3))
+        self._lap_start_time = now
+        self._points_since_lap_start = 0
+        self.lap += 1
+        if self.lap > total_laps:
+            self.finish_time = now - self.race_start_time
+            if self.finish_order is None and finish_order_cb is not None:
+                self.finish_order = finish_order_cb()
+            self.vel = 0
+            return True
+        return False
 
     def _border_risk(self):
         """Return 0..1 for current/future border contact risk."""
@@ -521,20 +561,6 @@ class AIRacer:
             return False
 
         self.current_point = 0
-        min_points_for_lap = int(len(self.personal_path) * 0.68)
-        if self._points_since_lap_start < min_points_for_lap:
-            return False
-        self._points_since_lap_start = 0
-        now = time.time()
-        if self._lap_start_time is not None:
-            lap_time = now - self._lap_start_time
-            self.lap_times.append(round(lap_time, 3))
-            self._lap_start_time = now
-        self.lap += 1
-        if self.lap > total_laps:
-            self.finish_time = now - self.race_start_time
-            self.vel = 0
-            return True
         return False
 
     def _catch_missed_waypoints(self, total_laps, cx, cy, hx, hy):
@@ -595,6 +621,13 @@ class AIRacer:
             cached = (rotated, mask, rotated.get_size())
             self._rotated_cache[bucket] = cached
         return cached
+
+    def check_collision(self, mask, x=0, y=0):
+        rotated, car_mask, (mw, mh) = self._get_rotated()
+        cx = self.x + self.img.get_width() / 2
+        cy = self.y + self.img.get_height() / 2
+        offset = (int(cx - mw / 2 - x), int(cy - mh / 2 - y))
+        return mask.overlap(car_mask, offset)
 
     def _car_hits_border_at(self, x, y, angle=None):
         if self.border_mask is None:

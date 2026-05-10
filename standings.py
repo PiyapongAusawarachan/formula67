@@ -20,16 +20,15 @@ def compute_standings(player_car, ai_racers, race_manager, path,
                       race_finished=False):
     """Sorted racer dicts, fastest / farthest first."""
     entries = []
-    if race_finished and race_manager.lap_times:
-        player_finish = sum(race_manager.lap_times)
-    else:
-        player_finish = None
+    player_finish = (race_manager.player_finish_time
+                     if race_manager.player_finished else None)
     player_best = (min(race_manager.lap_times)
                    if race_manager.lap_times else None)
     entries.append({
         "name": "You",
         "is_player": True,
         "finish_time": player_finish,
+        "finish_order": getattr(race_manager, "player_finish_order", None),
         "lap": race_manager.current_lap,
         "progress": player_progress_score(player_car, race_manager, path),
         "color": (255, 90, 90),
@@ -40,6 +39,7 @@ def compute_standings(player_car, ai_racers, race_manager, path,
             "name": ai.name,
             "is_player": False,
             "finish_time": ai.finish_time,
+            "finish_order": getattr(ai, "finish_order", None),
             "lap": ai.lap,
             "progress": ai.progress_score(),
             "color": ai.accent_color,
@@ -48,7 +48,10 @@ def compute_standings(player_car, ai_racers, race_manager, path,
 
     def sort_key(e):
         if e["finish_time"] is not None:
-            return (0, e["finish_time"])
+            finish_order = e.get("finish_order")
+            if finish_order is None:
+                finish_order = 999
+            return (0, finish_order, e["finish_time"])
         return (1, -e["progress"])
     entries.sort(key=sort_key)
     for i, e in enumerate(entries, start=1):

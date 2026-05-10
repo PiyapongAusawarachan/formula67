@@ -283,6 +283,7 @@ def main():
                 for ai in ai_racers:
                     if ai.finish_time is None:
                         ai.finish_time = time.time() - race_manager._race_start_time
+                        ai.finish_order = race_manager.next_finish_order()
 
             if not race_manager.player_finished:
                 nitro_requested = (keys[pygame.K_LSHIFT]
@@ -329,6 +330,11 @@ def main():
 
             for ai in ai_racers:
                 ai.update(race_manager.TOTAL_LAPS)
+                ai.handle_finish_line(
+                    track.at_finish_line(ai),
+                    race_manager.TOTAL_LAPS,
+                    race_manager.next_finish_order,
+                )
 
             standings = compute_standings(player_car, ai_racers,
                                           race_manager, PATH)
