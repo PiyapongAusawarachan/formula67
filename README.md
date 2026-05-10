@@ -120,8 +120,8 @@ visualization report.
 
 ## Final Submission Notes
 
-- Paste the final YouTube presentation link into [DESCRIPTION.md](DESCRIPTION.md)
-  before submission.
+- The final YouTube presentation link is included in
+  [DESCRIPTION.md](DESCRIPTION.md).
 - Create the required GitHub releases or tags: `22_Apr_Version` and
   `10_May_Version`.
 - Submit the repository link through the course submission form or spreadsheet.

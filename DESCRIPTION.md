@@ -52,12 +52,10 @@ matplotlib/pandas data visualization.
 
 - **UML class diagram (PDF):** [docs/UML_Class_Diagram.pdf](docs/UML_Class_Diagram.pdf)  
 
-- **Video presentation:** The final video should show gameplay, the statistics
-  interface, the class structure, and the meaning of the charts/tables. Replace
-  the placeholder below with the final public or unlisted YouTube link before
-  submission.
+- **Video presentation:** The final video shows gameplay, the statistics
+  interface, the class structure, and the meaning of the charts/tables.
 
-  **YouTube:** [PRESENTATION — paste full URL here](https://youtu.be/)
+  **YouTube:** [Formula 67 project presentation](https://youtu.be/eiBPWpCaYYc)
 
 ---
 

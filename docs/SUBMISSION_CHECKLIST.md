@@ -16,6 +16,7 @@ submission guideline.
 
 - [x] `docs/PROJECT_PROPOSAL.pdf`
 - [x] `docs/UML_Class_Diagram.pdf`
+- [x] `docs/Formula67_Canva_Presentation.pptx`
 - [x] `screenshots/gameplay/`
 - [x] `screenshots/visualization/`
 - [x] `screenshots/visualization/VISUALIZATION.md`
@@ -24,7 +25,7 @@ submission guideline.
 
 ## Manual Final Steps
 
-- [ ] Paste the real YouTube presentation URL into `DESCRIPTION.md`
+- [x] Paste the real YouTube presentation URL into `DESCRIPTION.md`
 - [ ] Create GitHub release/tag `22_Apr_Version`
 - [ ] Create GitHub release/tag `10_May_Version`
 - [ ] Submit the GitHub repository link in the class spreadsheet / classroom form
